@@ -26,14 +26,14 @@ LLM Inference for Large-Context Offline Workloads
 
 oLLM is a lightweight Python library for large-context LLM inference, built on top of Huggingface Transformers and PyTorch. It enables running models like [gpt-oss-20B](https://huggingface.co/openai/gpt-oss-20b) or [Llama-3.1-8B-Instruct](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct) on 100k context using ~$200 consumer GPU with 8GB VRAM.  No quantization is used—only fp16/bf16 precision. 
 
-###  8GB Nvidia 3060 Ti 100k context inference memory usage:
+###  8GB Nvidia 3060 Ti Inference memory usage:
 
-| Model   | Weights | KV cache | Hidden states | Baseline VRAM (no offload) | oLLM GPU VRAM | oLLM Disk (SSD) |
+| Model   | Weights | Context length | KV cache |  Baseline VRAM (no offload) | oLLM GPU VRAM | oLLM Disk (SSD) |
 | ------- | ------- | -------- | ------------- | ------------ | ---------------- | --------------- |
-| [llama3-1B-chat](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct)  | 2 GB (fp16)    | 12.6 GB  | 0.4 GB        | ~16 GB   | ~5 GB       | 18 GB  |
-| [llama3-3B-chat](https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct)  | 7 GB (fp16)   | 34.1 GB  | 0.61 GB       | ~42 GB   | ~5.3 GB     | 45 GB |
-| [llama3-8B-chat](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct)  | 16 GB (fp16)  | 52.4 GB  | 0.8 GB        | ~71 GB   | ~6.6 GB     | 75 GB  |
-| [gpt-oss-20B](https://huggingface.co/openai/gpt-oss-20b) | 13 GB (packed bf16) |  | 0.6GB  |    | ~6.4GB, large context support is on the way | 20GB  |
+| [gpt-oss-20B](https://huggingface.co/openai/gpt-oss-20b) | 13 GB (packed bf16) | 10k | 1.4 GB | ~40 GB   | ~7.3GB | 15 GB  |
+| [llama3-1B-chat](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct)  | 2 GB (fp16) | 100k   | 12.6 GB          | ~16 GB   | ~5 GB       | 15 GB  |
+| [llama3-3B-chat](https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct)  | 7 GB (fp16) | 100k  | 34.1 GB | ~42 GB   | ~5.3 GB     | 42 GB |
+| [llama3-8B-chat](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct)  | 16 GB (fp16) | 100k  | 52.4 GB | ~71 GB   | ~6.6 GB     | 69 GB  |
 
 <small>By "Baseline" we mean typical inference without any offloading</small>
 
@@ -92,3 +92,4 @@ or run sample python script as `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 ## Contact us
 If there’s a model you’d like to see supported, feel free to reach out at anuarsh@ailabs.us—I’ll do my best to make it happen.
+
