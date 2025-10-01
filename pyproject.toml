@@ -25,6 +25,14 @@ dependencies = [
     "pillow"
 ]
 
+[project.optional-dependencies]
+diffusion = [
+    "bitsandbytes>=0.45.0; platform_system != 'Windows'",
+    "omegaconf>=2.3.0",
+    "scipy>=1.11.0",
+    "xformers>=0.0.26; platform_system == 'Linux'",
+]
+
 [project.urls]
 "Homepage" = "https://github.com/Mega4alik/ollm"
 "Bug Tracker" = "https://github.com/Mega4alik/ollm/issues"

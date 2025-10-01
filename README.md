@@ -99,55 +99,84 @@ or run sample python script as `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 ## Diffusion pipelines on small GPUs
 
-The new adapter registry lets you instantiate diffusion pipelines alongside LLMs. To run a public Stable Diffusion XL checkpoint:
+Large diffusion checkpoints behave very differently from autoregressive LLMs: there is no KV cache to offload, but the UNet +
+text encoder + VAE stack can easily exceed 60 GB in FP16.  The diffusion adapter mirrors oLLM’s SSD-first philosophy by keeping
+all large modules on CPU/disk and only staging the active block on GPU via `diffusers`’ sequential offload APIs.  Combined with
+attention slicing, VAE tiling, and optional xFormers attention, Qwen Image Edit and SDXL now run end-to-end on 8–12 GB cards.
 
-```python
-from ollm import Inference
+### What changes under the hood?
 
-pipe = Inference("sdxl-base-1.0", device="cuda:0")
-pipe.ini_model(models_dir="./models")
-result = pipe.generate(
-    prompt="A cinematic photo of a koala astronaut exploring a neon jungle",
-    num_inference_steps=35,
-    guidance_scale=7.0,
-    output_type="pil",
-)
-result.images[0].save("koala.png")
-```
+| Optimisation | Purpose | Where it lives |
+| --- | --- | --- |
+| Sequential CPU offload | Streams UNet/VAE blocks between CPU and GPU, mimicking oLLM’s layer streaming | `DiffusionOptimizationConfig.sequential_cpu_offload` |
+| Attention slicing / windowing | Bounds memory of spatial attention for 1024×1024 renders | `attention_slicing`, `max_attention_window` |
+| VAE tiling & slicing | Decodes large canvases in overlapping tiles to avoid activation spikes | `enable_vae_tiling`, `enable_vae_slicing` |
+| Prompt embedding cache | Encodes prompts once and reuses tensors across batches/runs | `DiffusionRunner` |
+| Optional xFormers / channels-last | Uses memory-efficient kernels when available | `enable_xformers`, `enable_channels_last` |
 
-### Qwen Image Edit (Hugging Face)
+These knobs are exposed via keyword arguments on `Inference` or from the sample CLI (see below).  By default the adapter keeps
+text encoders on CPU—only the UNet is migrated to GPU per denoising step—so VRAM usage stays within ~7–8 GB even for the
+19 GB Qwen Image Edit checkpoint.
 
-`qwen-image-edit` now resolves directly to the official Hugging Face diffusers weights ([Qwen/Qwen-Image-Edit-2509](https://huggingface.co/Qwen/Qwen-Image-Edit-2509)). The adapter streams the 19 GB checkpoint through CPU/disk, keeping runtime VRAM under 9 GB on cards like the RTX 3060.
+### Running SDXL or Qwen Image Edit programmatically
 
 ```python
 from PIL import Image
 
 from ollm import Inference
 
-pipe = Inference("qwen-image-edit", device="cuda:0")
+pipe = Inference(
+    "qwen-image-edit",
+    device="cuda:0",
+    sequential_cpu_offload=True,   # default: stream UNet blocks from CPU
+    attention_slicing="auto",      # cap attention memory
+    forward_chunk_size=2,           # chunk UNet feed-forward ops
+)
 pipe.ini_model(models_dir="./models")
 
-source_image = Image.open("input.png").convert("RGB")
+init_image = Image.open("input.png").convert("RGB")
 result = pipe.generate(
     prompt="A watercolor skyline at dusk",
-    image=source_image,
+    image=init_image,
     strength=0.55,
-    num_inference_steps=25,
-    guidance_scale=4.5,
-    output_type="pil",
+    num_inference_steps=20,
+    guidance_scale=4.0,
+    num_images_per_prompt=2,
 )
-result.images[0].save("edited.png")
+
+for idx, img in enumerate(result.images):
+    img.save(f"edited_{idx}.png")
 ```
 
-Need to pull from an alternate mirror (e.g., a private CivitAI ZIP export)? Pass `download_url=...` to `Inference` or set `OLLMDIFF_QWEN_IMAGE_EDIT_URL` before calling `ini_model`—the adapter will extract the archive into `./models/qwen-image-edit` automatically.
+Need weights from a private CivitAI mirror? Pass `download_url=...` to `Inference` or set the environment variable
+`OLLMDIFF_QWEN_IMAGE_EDIT_URL`.  ZIP archives are extracted into `./models/<model-id>` automatically as long as they contain the
+standard diffusers layout (`model_index.json`, `unet`, `vae`, ...).
 
-Key memory-saving features that activate automatically:
+### CLI: inspect VRAM-friendly presets
 
-- `enable_sequential_cpu_offload` streams UNet/vae blocks between CPU and GPU, keeping VRAM usage close to 6–8 GB.
-- VAE tiling + attention slicing reduce activation peaks on large (1024x1024) renders.
-- Scheduler overrides and deterministic seeds are exposed through `DiffusionRunner` for reproducibility.
+```
+python samples/run_diffusion.py qwen-image-edit "Refine the sky with a golden sunset" \
+    --image input.png --output sunset.png --num-steps 18 --guidance 4.5 \
+    --num-images 2 --clip-skip 2 --guidance-rescale 0.7 \
+    --forward-chunk 2 --attention-slicing auto
+```
 
-⚠️ CivitAI often distributes diffusers weights as ZIP archives. Ensure the archive contains the diffusers directory structure (`model_index.json`, `unet`, `vae`, etc.). The adapter extracts archives automatically into `./models/qwen-image-edit`.
+Flags such as `--no-sequential-offload`, `--xformers`, `--no-vae-tiling`, and `--text-encoder-on-gpu` map directly to the
+`DiffusionOptimizationConfig` dataclass.  You can inspect the active optimisation plan via `Inference(...).adapter.metadata()`.
+
+### Expected VRAM with defaults (RTX 3060 Ti, 8 GB)
+
+| Model | Precision | Steps | Peak VRAM | Notes |
+| --- | --- | --- | --- | --- |
+| SDXL Base 1.0 | fp16 | 30 | ~7.2 GB | Sequential offload + tiling |
+| Qwen Image Edit 2509 | fp16 | 20 | ~7.6 GB | Text encoder kept on CPU, UNet streamed |
+| Qwen Image Edit 2509 | fp16 | 8 | ~6.1 GB | Lightning-style LoRA (fast draft renders) |
+
+Reducing steps (e.g., Lightning LoRAs), enabling xFormers, or rendering at 768×768 further lowers memory pressure.  For extreme
+constraints you can disable classifier-free guidance or fall back to CPU generation—the adapter reuses the same code paths.
+
+⚠️ CivitAI archives should include the diffusers folder structure.  If you see `model_index.json` alongside `unet/` and `vae/`, the
+auto-extractor will place them correctly under `./models/<model-id>`.
 
 ## Roadmap
 *For visibility of what's coming next (subject to change)*

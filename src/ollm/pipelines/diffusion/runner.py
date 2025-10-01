@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import inspect
+from collections import OrderedDict
 from dataclasses import dataclass, field, fields
-from typing import Any, Dict, Optional, Sequence, Union
+from typing import Any, Dict, Optional, Sequence, Tuple, Union
 
 import torch
 
@@ -30,6 +32,17 @@ class DiffusionRunConfig:
     extra_options: Dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class _PromptCacheKey:
+    prompt: Tuple[str, ...]
+    negative: Tuple[str, ...]
+    guidance: float
+    dtype: torch.dtype
+    device: str
+    num_images_per_prompt: int
+    clip_skip: Optional[int]
+
+
 class DiffusionRunner:
     """Executes diffusion denoising loops with resource-aware defaults."""
 
@@ -45,6 +58,8 @@ class DiffusionRunner:
         self.torch_dtype = torch_dtype
         self._apply_scheduler_override(scheduler_override)
         self.pipeline.set_progress_bar_config(leave=False)
+        self._prompt_cache: "OrderedDict[_PromptCacheKey, Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]]" = OrderedDict()
+        self._max_cache_entries = 8
 
     def _apply_scheduler_override(self, scheduler_name: Optional[str]) -> None:
         if not scheduler_name:
@@ -86,9 +101,32 @@ class DiffusionRunner:
             "output_type": config.output_type,
         }
 
-        if config.prompt is not None:
+        do_guidance = config.guidance_scale is not None and config.guidance_scale > 1.0
+        num_images_per_prompt = int(config.extra_options.pop("num_images_per_prompt", 1) or 1)
+        clip_skip = config.extra_options.pop("clip_skip", None)
+
+        if num_images_per_prompt > 1:
+            call_kwargs["num_images_per_prompt"] = num_images_per_prompt
+        if clip_skip is not None:
+            call_kwargs["clip_skip"] = clip_skip
+
+        prompt_embeds, negative_embeds = self._resolve_prompt_embeddings(
+            config,
+            do_guidance,
+            num_images_per_prompt,
+            clip_skip=clip_skip,
+        )
+
+        if prompt_embeds is not None:
+            call_kwargs["prompt_embeds"] = prompt_embeds
+            call_kwargs.pop("prompt", None)
+        elif config.prompt is not None:
             call_kwargs["prompt"] = config.prompt
-        if config.negative_prompt is not None:
+
+        if negative_embeds is not None:
+            call_kwargs["negative_prompt_embeds"] = negative_embeds
+            call_kwargs.pop("negative_prompt", None)
+        elif config.negative_prompt is not None:
             call_kwargs["negative_prompt"] = config.negative_prompt
         if config.height is not None:
             call_kwargs["height"] = config.height
@@ -123,3 +161,110 @@ class DiffusionRunner:
             call_kwargs.update(config.extra_options)
 
         return self.pipeline(**call_kwargs)
+
+    # ------------------------------------------------------------------
+    # Prompt embedding cache + helpers
+    # ------------------------------------------------------------------
+
+    def clear_prompt_cache(self) -> None:
+        """Drop all cached prompt embeddings."""
+
+        self._prompt_cache.clear()
+
+    def _resolve_prompt_embeddings(
+        self,
+        config: DiffusionRunConfig,
+        do_guidance: bool,
+        num_images_per_prompt: int,
+        clip_skip: Optional[int] = None,
+    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
+        if config.prompt_embeds is not None:
+            prompt = config.prompt_embeds.to(self.device)
+            negative = (
+                config.negative_prompt_embeds.to(self.device)
+                if config.negative_prompt_embeds is not None
+                else None
+            )
+            return prompt, negative
+
+        encode_fn = getattr(self.pipeline, "_encode_prompt", None)
+        tokenizer = getattr(self.pipeline, "tokenizer", None)
+        if encode_fn is None or tokenizer is None:
+            return None, None
+
+        prompt_tuple = self._normalize_prompt(config.prompt)
+        negative_tuple = self._normalize_prompt(config.negative_prompt)
+        cache_key = _PromptCacheKey(
+            prompt=prompt_tuple,
+            negative=negative_tuple,
+            guidance=float(config.guidance_scale or 0.0),
+            dtype=self.torch_dtype,
+            device=str(self.device),
+            num_images_per_prompt=num_images_per_prompt,
+            clip_skip=clip_skip,
+        )
+
+        if cache_key in self._prompt_cache:
+            prompt_embeds, negative_embeds = self._prompt_cache[cache_key]
+            # Move to end to maintain LRU semantics
+            self._prompt_cache.move_to_end(cache_key)
+            return (
+                prompt_embeds.to(self.device) if prompt_embeds is not None else None,
+                negative_embeds.to(self.device) if negative_embeds is not None else None,
+            )
+
+        call_kwargs: Dict[str, Any] = {
+            "prompt": prompt_tuple if len(prompt_tuple) > 1 else prompt_tuple[0] if prompt_tuple else None,
+            "device": self.device,
+            "num_images_per_prompt": num_images_per_prompt,
+            "do_classifier_free_guidance": do_guidance,
+            "negative_prompt": negative_tuple if len(negative_tuple) > 1 else (
+                negative_tuple[0] if negative_tuple else None
+            ),
+            "clip_skip": clip_skip,
+        }
+        call_kwargs = self._filter_kwargs(encode_fn, call_kwargs)
+
+        outputs = encode_fn(**call_kwargs)
+        if isinstance(outputs, tuple):
+            prompt_embeds = outputs[0]
+            negative_embeds = outputs[1] if len(outputs) > 1 else None
+        else:
+            prompt_embeds = outputs
+            negative_embeds = None
+
+        prompt_embeds = prompt_embeds.to(self.device)
+        if negative_embeds is not None:
+            negative_embeds = negative_embeds.to(self.device)
+
+        self._store_prompt_cache(cache_key, prompt_embeds, negative_embeds)
+        return prompt_embeds, negative_embeds
+
+    def _store_prompt_cache(
+        self,
+        key: _PromptCacheKey,
+        prompt_embeds: Optional[torch.Tensor],
+        negative_embeds: Optional[torch.Tensor],
+    ) -> None:
+        if key in self._prompt_cache:
+            self._prompt_cache.move_to_end(key)
+        self._prompt_cache[key] = (
+            prompt_embeds.detach().to("cpu") if prompt_embeds is not None else None,
+            negative_embeds.detach().to("cpu") if negative_embeds is not None else None,
+        )
+        while len(self._prompt_cache) > self._max_cache_entries:
+            self._prompt_cache.popitem(last=False)
+
+    @staticmethod
+    def _normalize_prompt(value: Optional[Union[str, Sequence[str]]]) -> Tuple[str, ...]:
+        if value is None:
+            return tuple()
+        if isinstance(value, str):
+            return (value,)
+        return tuple(value)
+
+    @staticmethod
+    def _filter_kwargs(fn, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        sig = inspect.signature(fn)
+        allowed = set(sig.parameters.keys())
+        return {k: v for k, v in kwargs.items() if k in allowed}

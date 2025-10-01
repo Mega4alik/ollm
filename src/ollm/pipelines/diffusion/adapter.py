@@ -9,6 +9,11 @@ import torch
 
 from ..base import PipelineAdapter
 from ..registry import register_adapter
+from .optimizations import (
+    DiffusionOptimizationConfig,
+    apply_diffusion_optimizations,
+    build_optimizations,
+)
 from .runner import DiffusionRunner
 
 if TYPE_CHECKING:  # pragma: no cover - only for type checkers
@@ -97,6 +102,19 @@ class DiffusionPipelineAdapter(PipelineAdapter):
                 overrides[field] = self.kwargs[field]
         if overrides:
             self.config = replace(self.config, **overrides)
+        opt_defaults = {
+            "sequential_cpu_offload": self.config.enable_sequential_offload,
+            "model_cpu_offload": self.config.enable_cpu_offload,
+            "enable_vae_tiling": self.config.enable_vae_tiling,
+            "attention_slicing": self.config.enable_attention_slicing,
+        }
+        opt_overrides = {
+            key: self.kwargs[key]
+            for key in DiffusionOptimizationConfig.__annotations__.keys()
+            if key in self.kwargs
+        }
+        opt_defaults.update(opt_overrides)
+        self.optimizations = build_optimizations(**opt_defaults)
         self.runner: Optional[DiffusionRunner] = None
 
     def _resolve_config(self) -> DiffusionModelConfig:
@@ -162,20 +180,7 @@ class DiffusionPipelineAdapter(PipelineAdapter):
             variant=self.config.variant,
         )
 
-        if self.config.enable_attention_slicing:
-            pipeline.enable_attention_slicing()
-        if self.config.enable_vae_tiling and hasattr(pipeline, "vae"):
-            pipeline.enable_vae_tiling()
-
-        if self.config.enable_sequential_offload:
-            pipeline.enable_sequential_cpu_offload(self.device)
-        elif self.config.enable_cpu_offload:
-            pipeline.enable_model_cpu_offload(self.device)
-
-        try:
-            pipeline.unet.to(memory_format=torch.channels_last)
-        except Exception:
-            pass
+        apply_diffusion_optimizations(pipeline, self.optimizations, self.device)
 
         self.model = pipeline
         self.runner = DiffusionRunner(
@@ -191,4 +196,10 @@ class DiffusionPipelineAdapter(PipelineAdapter):
         return self.runner.generate(*args, **kwargs)
 
     def metadata(self) -> Dict[str, str]:
-        return {"type": "diffusion"}
+        meta: Dict[str, str] = {"type": "diffusion", "model_id": self.cache_id}
+        meta.update({
+            "sequential_cpu_offload": str(self.optimizations.sequential_cpu_offload),
+            "attention_slicing": str(self.optimizations.attention_slicing),
+            "vae_tiling": str(self.optimizations.enable_vae_tiling),
+        })
+        return meta
