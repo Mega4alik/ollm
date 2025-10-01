@@ -18,7 +18,11 @@ dependencies = [
     "transformers>=4.55.0", #tested: 4.55.4, 4.56.1
     "accelerate",
     "flash-attn", #tested: 2.7.4.post1
-    "flash-linear-attention"
+    "flash-linear-attention",
+    "diffusers>=0.30.0",
+    "safetensors",
+    "huggingface-hub>=0.23.0",
+    "pillow"
 ]
 
 [project.urls]
