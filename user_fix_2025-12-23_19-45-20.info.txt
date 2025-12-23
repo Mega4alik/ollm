@@ -1,0 +1,25 @@
+Explanation of Fixes and Caveats (Timestamp: 2025-12-23_19-45-20)
+
+1.  **Multi-GPU Support (`device` argument)**:
+    -   **Question**: "How come I have to only [device='cuda:0'] and not [device=['cuda:0', 'cuda:1']]"?
+    -   **Answer**: The current `Inference` class implementation in `src/ollm/inference.py` initializes `self.device` using `torch.device(device)`. This constructor expects a single string (e.g., "cuda:0" or "cpu"), not a list.
+    -   **Optimum Benchmark Context**: The code snippet you shared regarding `PyTorchConfig` comes from a different library (`optimum-benchmark`) which handles distributed setups differently. In `ollm`, the model loading logic (`from_pretrained`) currently relies on `device_map="cpu"` (with subsequent offloading) or explicit single-device placement. To support multiple GPUs natively in `ollm`'s `Inference` class, the `__init__` method and model loading strategy would need significant refactoring to accept a list of devices or a `device_map="auto"` configuration.
+
+2.  **`use_kvikio=True` Support**:
+    -   **Status**: This parameter is **not supported** in the current `ollm` codebase.
+    -   **Explanation**: While KvikIO (part of NVIDIA MagnumIO) enables high-performance GPUDirect Storage (GDS), the `Inference` class `__init__` method does not accept `use_kvikio` as an argument. Passing it raises a `TypeError`.
+    -   **Fix**: I have commented it out in `scripts/example_benchmark.py` and added a try-except block to handle such initialization errors gracefully.
+
+3.  **`AttributeError: 'NoneType' object has no attribute 'manifest'`**:
+    -   **Cause**: This error typically occurs when the `loader` object in `voxtral.py` (or similar model files) is not correctly initialized before being accessed. In `src/ollm/inference.py`, the `loader` is assigned global/module-level scope inside `load_model`. If `ini_model` fails or is skipped, or if there's a race condition/import issue in a complex script (like `eval.py`), `loader` might remain `None`.
+    -   **Context**: The stack trace shows `self.layers[-1]._unload_layer_weights()` calling `loader.manifest`. If `loader` is `None`, this crashes. This suggests the model initialization sequence in `eval.py` might be flawed or `load_model` didn't complete successfully before weights were unloaded.
+
+4.  **Script Fixes (`scripts/example_benchmark.py`)**:
+    -   **Final Answer**: Added logic to decode and print the `answer` string, which was missing in the original snippet.
+    -   **Timing/Metrics**: Implemented working timing logic for `inference_duration` and `tokens_per_sec`.
+    -   **Attention Mask**: Explicitly created `attention_mask` to resolve the generation warning.
+    -   **VRAM Metric**: Added safe access to `torch.cuda.max_memory_allocated` to avoid crashes if running on CPU or if the device index is invalid.
+
+5.  **General Cleanups**:
+    -   Removed `reasoning_effort="minimal"` as it is not a valid argument for `apply_chat_template` in standard Transformers.
+    -   Ensured `sys.path` is correctly set so the script can run from the `scripts/` directory.

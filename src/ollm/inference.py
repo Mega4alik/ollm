@@ -87,31 +87,31 @@ class Inference:
 			from . import qwen3_next
 			qwen3_next.loader = MoEWeightsLoader(model_dir, device=self.device)
 			qwen3_next.stats = self.stats
-			self.model = qwen3_next.MyQwen3NextForCausalLM.from_pretrained(model_dir, torch_dtype=torch.bfloat16, device_map="cpu", attn_implementation=get_attn_implementation(), low_cpu_mem_usage=True, ignore_mismatched_sizes=True)
+			self.model = qwen3_next.MyQwen3NextForCausalLM.from_pretrained(model_dir, dtype=torch.bfloat16, device_map="cpu", attn_implementation=get_attn_implementation(), low_cpu_mem_usage=True, ignore_mismatched_sizes=True)
 		elif self.model_id=="gemma3-12B":
 			from . import gemma3
 			gemma3.loader = DenseWeightsLoader(model_dir, device=self.device)
 			gemma3.stats = self.stats
 			automodel = gemma3.MyGemma3ForConditionalGeneration if self.multimodality else gemma3.MyGemma3ForCausalLM
-			self.model = automodel.from_pretrained(model_dir, torch_dtype=torch.bfloat16, device_map="cpu", attn_implementation=get_attn_implementation(), low_cpu_mem_usage=True, ignore_mismatched_sizes=True)
+			self.model = automodel.from_pretrained(model_dir, dtype=torch.bfloat16, device_map="cpu", attn_implementation=get_attn_implementation(), low_cpu_mem_usage=True, ignore_mismatched_sizes=True)
 			self.processor = AutoProcessor.from_pretrained(model_dir)
 		elif self.model_id=="voxtral-small-24B":
 			from . import voxtral
 			voxtral.loader = DenseWeightsLoader(model_dir, device=self.device)
 			voxtral.stats = self.stats
-			self.model = voxtral.MyVoxtralForConditionalGeneration.from_pretrained(model_dir, torch_dtype="auto", device_map="cpu", attn_implementation=get_attn_implementation(), low_cpu_mem_usage=True, ignore_mismatched_sizes=True)
+			self.model = voxtral.MyVoxtralForConditionalGeneration.from_pretrained(model_dir, dtype="auto", device_map="cpu", attn_implementation=get_attn_implementation(), low_cpu_mem_usage=True, ignore_mismatched_sizes=True)
 			self.processor = AutoProcessor.from_pretrained(model_dir)
 			self.tokenizer = self.processor.tokenizer
 		elif self.model_id=="gpt-oss-20B":
 			from . import gpt_oss
 			gpt_oss.loader = GDSWeights(os.path.join(model_dir, "gds_export"), device=self.device)
 			gpt_oss.stats = self.stats
-			self.model = gpt_oss.MyGptOssForCausalLM.from_pretrained(model_dir, torch_dtype=torch.bfloat16, device_map="cpu", low_cpu_mem_usage=True, ignore_mismatched_sizes=True)		
+			self.model = gpt_oss.MyGptOssForCausalLM.from_pretrained(model_dir, dtype=torch.bfloat16, device_map="cpu", low_cpu_mem_usage=True, ignore_mismatched_sizes=True)
 		else:
 			from . import llama
 			llama.loader = SingleDenseWeightsLoader(model_dir, device=self.device) if self.model_id in ["llama3-1B-chat"] else DenseWeightsLoader(model_dir, device=self.device)
 			llama.stats = self.stats
-			self.model = llama.MyLlamaForCausalLM.from_pretrained(model_dir, torch_dtype=torch.bfloat16, device_map="cpu", attn_implementation=get_attn_implementation(), low_cpu_mem_usage=True, ignore_mismatched_sizes=True)
+			self.model = llama.MyLlamaForCausalLM.from_pretrained(model_dir, dtype=torch.bfloat16, device_map="cpu", attn_implementation=get_attn_implementation(), low_cpu_mem_usage=True, ignore_mismatched_sizes=True)
 
 		self.model.eval()
 		self.model.to(self.device)
