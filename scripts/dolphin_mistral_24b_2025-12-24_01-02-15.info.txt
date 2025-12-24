@@ -1,0 +1,27 @@
+Dolphin 24B Integration Changes
+
+Date: 2025-12-24_01-02-15
+
+Summary:
+Added support for the "dphn/Dolphin3.0-R1-Mistral-24B" model (mapped to ID "dolphin-24B") to the OLLM library. This model is based on the Mistral architecture.
+
+Changes:
+1. Created `src/ollm/mistral.py`:
+   - Implements custom Mistral classes (`MyMistralMLP`, `MyMistralDecoderLayer`, `MyMistralModel`, `MyMistralForCausalLM`) to handle layer-wise weight loading/unloading (offloading) to save VRAM.
+   - Monkey-patches `transformers.models.mistral.modeling_mistral` to use these optimized classes.
+
+2. Updated `src/ollm/inference.py`:
+   - Added "dolphin-24B" to the `models_list` and `hf_download` dictionary with the URL "dphn/Dolphin3.0-R1-Mistral-24B".
+   - Updated `load_model` to detect "dolphin-24B" and use the new `mistral` module.
+
+3. Created `scripts/example_dolphin_mistral.py`:
+   - A new example script demonstrating how to use the "dolphin-24B" model.
+   - Configured with `temperature=0.1` and `do_sample=True` as requested.
+   - demonstrates offloading (set to 20 layers by default).
+
+Q&A:
+Q: Why use `mistral.py` and not `llama.py`?
+A: While Llama and Mistral are architecturally similar, `transformers` uses distinct classes for them (`MistralForCausalLM` vs `LlamaForCausalLM`). Creating a dedicated `mistral.py` ensures correct monkey-patching of the Mistral-specific classes and allows for future Mistral-specific optimizations (like sliding window attention if needed).
+
+Q: How to run the example?
+A: `export PYTHONPATH=src && python3 scripts/example_dolphin_mistral.py`
