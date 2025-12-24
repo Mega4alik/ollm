@@ -59,7 +59,8 @@ class Inference:
 			"gpt-oss-20B": "AnuarSh/gpt-oss-20B",
 			"qwen3-next-80B": "Qwen/Qwen3-Next-80B-A3B-Instruct",
 			"gemma3-12B": "google/gemma-3-12b-it",
-			"voxtral-small-24B": "mistralai/Voxtral-Small-24B-2507"
+			"voxtral-small-24B": "mistralai/Voxtral-Small-24B-2507",
+			"dolphin-24B": "dphn/Dolphin3.0-R1-Mistral-24B"
 		}
 		url = urls[self.model_id]
 		print(f"Downloading {url} ...")
@@ -67,7 +68,7 @@ class Inference:
 
 	
 	def ini_model(self, models_dir="./models/", force_download=False):
-		models_list = ["llama3-1B-chat", "llama3-3B-chat", "llama3-8B-chat", "gpt-oss-20B", "qwen3-next-80B", "gemma3-12B", "voxtral-small-24B"]
+		models_list = ["llama3-1B-chat", "llama3-3B-chat", "llama3-8B-chat", "gpt-oss-20B", "qwen3-next-80B", "gemma3-12B", "voxtral-small-24B", "dolphin-24B"]
 		if self.model_id not in models_list:
 			raise ValueError("Incorrect model id. It must be one of", models_list)
 		
@@ -107,6 +108,11 @@ class Inference:
 			gpt_oss.loader = GDSWeights(os.path.join(model_dir, "gds_export"), device=self.device)
 			gpt_oss.stats = self.stats
 			self.model = gpt_oss.MyGptOssForCausalLM.from_pretrained(model_dir, dtype=torch.bfloat16, device_map="cpu", low_cpu_mem_usage=True, ignore_mismatched_sizes=True)
+		elif self.model_id=="dolphin-24B":
+			from . import mistral
+			mistral.loader = SingleDenseWeightsLoader(model_dir, device=self.device) if os.path.exists(os.path.join(model_dir, "model.safetensors")) else DenseWeightsLoader(model_dir, device=self.device)
+			mistral.stats = self.stats
+			self.model = mistral.MyMistralForCausalLM.from_pretrained(model_dir, dtype=torch.bfloat16, device_map="cpu", attn_implementation=get_attn_implementation(), low_cpu_mem_usage=True, ignore_mismatched_sizes=True)
 		else:
 			from . import llama
 			llama.loader = SingleDenseWeightsLoader(model_dir, device=self.device) if self.model_id in ["llama3-1B-chat"] else DenseWeightsLoader(model_dir, device=self.device)
