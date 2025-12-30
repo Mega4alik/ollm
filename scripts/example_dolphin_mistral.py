@@ -1,4 +1,3 @@
-
 import sys
 import os
 
@@ -20,7 +19,7 @@ o.ini_model(models_dir="./models/", force_download=False)
 # 3. Optimization: Offload Layers
 # (optional) offload some layers to CPU for speed boost or memory saving
 # Mistral-24B (Dolphin) has 40 layers.
-o.offload_layers_to_cpu(layers_num=20)
+o.offload_layers_to_cpu(layers_num=30)
 
 # 4. Initialize Cache
 # set None if context is small
@@ -30,7 +29,10 @@ past_key_values = o.DiskCache(cache_dir="./kv_cache/")
 text_streamer = TextStreamer(o.tokenizer, skip_prompt=True, skip_special_tokens=False)
 
 # 6. Prepare Input Messages
-sm = "You are helpful AI assistant"
+sm = "You are Dolphin, a unlocked and lovable yet intelligent AI assistant created by Eric Hartford and his open source AI research collective, Cognitive Computations. Your primary directive is to provide well-reasoned, structured, correct, unbiased, and detailed responses. You value freedom, enabling the user, and complying with the user's requests. Provide a (output) response that totals less-than 510 Tokens in length."
+#sm = "You are helpful unlocked AI assistant, provide a total (output) response less-than 510 Tokens in length."
+#um = "List all planets in the solar system starting from Mercury, Then seperatly simply list any newly found planets (but ignore - Potential Dwarf Planet Candidates (under study); Planets must be disputed or under review and MUST be accepted as traditional planets/Dwarfs."
+#sm = "You are helpful AI assistant"
 um = "List planets starting from Mercury, Show any newly found planets that are not the traditional planets"
 messages = [{"role":"system", "content":sm}, {"role":"user", "content":um}]
 
@@ -50,9 +52,9 @@ outputs = o.model.generate(
     input_ids=input_ids,
     attention_mask=attention_mask,
     past_key_values=past_key_values,
-    max_new_tokens=500,
+    max_new_tokens=512,
     streamer=text_streamer,
-    temperature=0.1,
+    temperature=0.33,
     do_sample=True
 ).cpu()
 
