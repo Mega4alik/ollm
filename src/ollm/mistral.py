@@ -26,7 +26,7 @@ from transformers.modeling_outputs import BaseModelOutputWithPast
 
 class MyMistralMLP(MistralMLP):
 	def forward(self, x):
-		chunk_size, chunks = 16384, []
+		chunk_size, chunks = 8192, []
 		x = x.squeeze(0)
 		for i in range(0, x.shape[0], chunk_size):
 			gate_chunk = self.act_fn(self.gate_proj(x[i:i+chunk_size]))
