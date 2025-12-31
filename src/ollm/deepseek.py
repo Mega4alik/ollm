@@ -2,17 +2,19 @@
 
 import time, os
 from datetime import datetime
+import threading
+import numpy as np
 import torch
 from torch import nn
-from typing import Optional, Any
+from typing import Callable, Optional, Tuple, Union, Dict, Any, Iterable, List, Unpack
 from .utils import _walk_to_parent, _assign_tensor_to_module, _set_meta_placeholder
 
 # shared objects
 loader, stats = None, None
 
-# Since DeepSeek uses remote code (trust_remote_code=True), we cannot import classes statically easily.
-# We will use a dynamic wrapper approach.
-from transformers import AutoModelForCausalLM
+# Import from local modeling file
+from .modeling_deepseek import DeepseekForCausalLM, DeepseekModel, DeepseekDecoderLayer, DeepseekConfig, DeepseekRMSNorm, DeepseekMLP, DeepseekMoE
+from transformers.modeling_outputs import BaseModelOutputWithPast
 
 class loaderLayer:
 	def _load_layer_weights(self):
@@ -22,6 +24,7 @@ class loaderLayer:
 		d = loader.load_dict_to_cuda(base)
 		for attr_path, tensor in d.items():
 			parent, leaf = _walk_to_parent(self, attr_path)
+			if hasattr(parent, "base_layer"): parent = parent.base_layer #peft lora
 			_assign_tensor_to_module(parent, leaf, tensor)
 		if stats: stats.set("layer_load", t1)
 
@@ -29,68 +32,70 @@ class loaderLayer:
 		base = f"model.layers.{self.layer_idx}."
 		for attr_path in loader.manifest[base]:
 			parent, leaf = _walk_to_parent(self, attr_path)
+			if hasattr(parent, "base_layer"): parent = parent.base_layer #peft lora
 			_set_meta_placeholder(parent, leaf)
+
+
+class MyDeepseekDecoderLayer(DeepseekDecoderLayer, loaderLayer):
+	def __init__(self, config: DeepseekConfig, layer_idx: int):
+		super().__init__(config, layer_idx)
+		self.layer_idx = layer_idx
+
+	def forward(self, *args, **kwargs):
+		self._load_layer_weights()
+		out = super().forward(*args, **kwargs)
+		self._unload_layer_weights()
+		return out
+
+
+class MyDeepseekModel(DeepseekModel):
+	def __init__(self, config: DeepseekConfig):
+		super().__init__(config)
+        # Re-initialize layers with our custom class
+		self.layers = nn.ModuleList([MyDeepseekDecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)])
+		self._init_weights(self.layers) # Re-init weights? No, we load them.
+        # Unload initially
+		for layer in self.layers:
+			layer._unload_layer_weights()
+
+	def forward(self, *args, **kwargs):
+        # Ensure embeddings on device if needed (DeepSeek might handle it, but for safety)
+		if "input_ids" in kwargs:
+			self.embed_tokens.to(kwargs["input_ids"].device)
+		elif len(args) > 0 and args[0] is not None: # input_ids
+			self.embed_tokens.to(args[0].device)
+
+		self.embed_tokens.cpu()
+		out = super().forward(*args, **kwargs)
+		self.embed_tokens.to(out.last_hidden_state.device)
+		return out
+
+# Monkey-patching module
+import src.ollm.modeling_deepseek as modeling_deepseek
+modeling_deepseek.DeepseekDecoderLayer = MyDeepseekDecoderLayer
+modeling_deepseek.DeepseekModel = MyDeepseekModel
 
 
 class oForGeneration:
 	def generate(self, **args):
 		with torch.no_grad():
-            # We must call the original class's generate, bypassing this mixin's generate to avoid infinite recursion
-            # or simply rely on the fact that this method IS the new generate.
-            # But we want to call the base implementation.
-            # Since we dynamically create a class inheriting from (RemoteClass, oForGeneration),
-            # super() works if MRO is correct.
-            # RemoteClass usually inherits from GenerationMixin.
 			return super().generate(**args)
 
 	def offload_layers_to_cpu(self, layers_num=2):
 		print(f"offloading layers to CPU {layers_num}/{self.num_hidden_layers}...")
-		# For DeepSeek remote model, we assume standard structure `model.layers`
 		for layer_idx in range(min(layers_num, self.num_hidden_layers)):
 			base = f"model.layers.{layer_idx}."
 			loader.preload_layer_safetensors(base)
 			loader.offload_dict_to_gpu_cpu(base, gpu=False)
 		print(f"./finished offloading layers to CPU {layers_num}/{self.num_hidden_layers}")
 
-class MyDeepseekForCausalLM:
-    @classmethod
-    def from_pretrained(cls, model_dir, **kwargs):
-        # Load the original model with trust_remote_code=True
-        model = AutoModelForCausalLM.from_pretrained(model_dir, trust_remote_code=True, **kwargs)
 
-        # Create a dynamic class that inherits from the model's actual class and our mixin
-        RemoteClass = model.__class__
-        class DynamicDeepseekWrapper(RemoteClass, oForGeneration):
-            pass
+class MyDeepseekForCausalLM(DeepseekForCausalLM, oForGeneration):
+	def __init__(self, config):
+		super().__init__(config)
+		self.model = MyDeepseekModel(config) # Ensure we use our model
+		self.num_hidden_layers = config.num_hidden_layers
 
-        # Change the object's class to the new dynamic wrapper
-        model.__class__ = DynamicDeepseekWrapper
-
-        # Monkey-patch layers to support offloading
-        # Helper to patch a single layer instance
-        def patch_layer(layer, layer_idx):
-            layer.layer_idx = layer_idx
-            original_forward = layer.forward
-
-            # Create a mixin-like instance or just attach methods
-            loader_instance = loaderLayer()
-            loader_instance.layer_idx = layer_idx
-
-            def new_forward(*args, **kwargs):
-                loader_instance._load_layer_weights()
-                out = original_forward(*args, **kwargs)
-                loader_instance._unload_layer_weights()
-                return out
-
-            layer.forward = new_forward
-            # We also need to unload initially
-            loader_instance._unload_layer_weights()
-
-        # Iterate and patch
-        if hasattr(model, "model") and hasattr(model.model, "layers"):
-             for i, layer in enumerate(model.model.layers):
-                 patch_layer(layer, i)
-
-        model.num_hidden_layers = len(model.model.layers)
-
-        return model
+	def generate(self, **args):
+		with torch.no_grad():
+			return super().generate(**args)

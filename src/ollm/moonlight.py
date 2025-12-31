@@ -2,16 +2,19 @@
 
 import time, os
 from datetime import datetime
+import threading
+import numpy as np
 import torch
 from torch import nn
-from typing import Optional, Any
+from typing import Callable, Optional, Tuple, Union, Dict, Any, Iterable, List, Unpack
 from .utils import _walk_to_parent, _assign_tensor_to_module, _set_meta_placeholder
 
 # shared objects
 loader, stats = None, None
 
-# Uses remote code (trust_remote_code=True)
-from transformers import AutoModelForCausalLM
+# Import from local modeling file
+from .modeling_moonlight import DeepseekV3ForCausalLM, DeepseekV3Model, DeepseekV3DecoderLayer, DeepseekV3Config, DeepseekV3RMSNorm, DeepseekV3MLP, DeepseekV3MoE
+from transformers.modeling_outputs import BaseModelOutputWithPast
 
 class loaderLayer:
 	def _load_layer_weights(self):
@@ -21,6 +24,7 @@ class loaderLayer:
 		d = loader.load_dict_to_cuda(base)
 		for attr_path, tensor in d.items():
 			parent, leaf = _walk_to_parent(self, attr_path)
+			if hasattr(parent, "base_layer"): parent = parent.base_layer #peft lora
 			_assign_tensor_to_module(parent, leaf, tensor)
 		if stats: stats.set("layer_load", t1)
 
@@ -28,7 +32,46 @@ class loaderLayer:
 		base = f"model.layers.{self.layer_idx}."
 		for attr_path in loader.manifest[base]:
 			parent, leaf = _walk_to_parent(self, attr_path)
+			if hasattr(parent, "base_layer"): parent = parent.base_layer #peft lora
 			_set_meta_placeholder(parent, leaf)
+
+
+class MyDeepseekV3DecoderLayer(DeepseekV3DecoderLayer, loaderLayer):
+	def __init__(self, config: DeepseekV3Config, layer_idx: int):
+		super().__init__(config, layer_idx)
+		self.layer_idx = layer_idx
+
+	def forward(self, *args, **kwargs):
+		self._load_layer_weights()
+		out = super().forward(*args, **kwargs)
+		self._unload_layer_weights()
+		return out
+
+
+class MyDeepseekV3Model(DeepseekV3Model):
+	def __init__(self, config: DeepseekV3Config):
+		super().__init__(config)
+        # Re-initialize layers
+		self.layers = nn.ModuleList([MyDeepseekV3DecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)])
+		# Unload initially
+		for layer in self.layers:
+			layer._unload_layer_weights()
+
+	def forward(self, *args, **kwargs):
+		if "input_ids" in kwargs:
+			self.embed_tokens.to(kwargs["input_ids"].device)
+		elif len(args) > 0 and args[0] is not None:
+			self.embed_tokens.to(args[0].device)
+
+		self.embed_tokens.cpu()
+		out = super().forward(*args, **kwargs)
+		self.embed_tokens.to(out.last_hidden_state.device)
+		return out
+
+# Monkey-patching module
+import src.ollm.modeling_moonlight as modeling_moonlight
+modeling_moonlight.DeepseekV3DecoderLayer = MyDeepseekV3DecoderLayer
+modeling_moonlight.DeepseekV3Model = MyDeepseekV3Model
 
 
 class oForGeneration:
@@ -44,42 +87,13 @@ class oForGeneration:
 			loader.offload_dict_to_gpu_cpu(base, gpu=False)
 		print(f"./finished offloading layers to CPU {layers_num}/{self.num_hidden_layers}")
 
-class MyMoonlightForCausalLM:
-    @classmethod
-    def from_pretrained(cls, model_dir, **kwargs):
-        # Load the original model with trust_remote_code=True
-        model = AutoModelForCausalLM.from_pretrained(model_dir, trust_remote_code=True, **kwargs)
 
-        # Create a dynamic class that inherits from the model's actual class and our mixin
-        RemoteClass = model.__class__
-        class DynamicMoonlightWrapper(RemoteClass, oForGeneration):
-            pass
+class MyMoonlightForCausalLM(DeepseekV3ForCausalLM, oForGeneration):
+	def __init__(self, config):
+		super().__init__(config)
+		self.model = MyDeepseekV3Model(config)
+		self.num_hidden_layers = config.num_hidden_layers
 
-        # Change the object's class to the new dynamic wrapper
-        model.__class__ = DynamicMoonlightWrapper
-
-        # Monkey-patch or wrap layers to support offloading
-
-        def patch_layer(layer, layer_idx):
-            layer.layer_idx = layer_idx
-            original_forward = layer.forward
-
-            loader_instance = loaderLayer()
-            loader_instance.layer_idx = layer_idx
-
-            def new_forward(*args, **kwargs):
-                loader_instance._load_layer_weights()
-                out = original_forward(*args, **kwargs)
-                loader_instance._unload_layer_weights()
-                return out
-
-            layer.forward = new_forward
-            loader_instance._unload_layer_weights()
-
-        if hasattr(model, "model") and hasattr(model.model, "layers"):
-             for i, layer in enumerate(model.model.layers):
-                 patch_layer(layer, i)
-
-        model.num_hidden_layers = len(model.model.layers)
-
-        return model
+	def generate(self, **args):
+		with torch.no_grad():
+			return super().generate(**args)

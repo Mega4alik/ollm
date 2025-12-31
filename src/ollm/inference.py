@@ -138,6 +138,7 @@ class Inference:
 			from . import deepseek
 			deepseek.loader = DenseWeightsLoader(model_dir, device=self.device)
 			deepseek.stats = self.stats
+			# No trust_remote_code=True needed as we use local code
 			self.model = deepseek.MyDeepseekForCausalLM.from_pretrained(model_dir, dtype=torch.bfloat16, device_map="cpu", attn_implementation=get_attn_implementation(), low_cpu_mem_usage=True, ignore_mismatched_sizes=True)
 		elif self.model_id=="moonlight-16b":
 			from . import moonlight
