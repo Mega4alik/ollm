@@ -1,0 +1,28 @@
+Summary of Changes:
+Fixed critical import errors in `deepseek.py` and `moonlight.py` that prevented the scripts from running correctly. The issue was due to hardcoded absolute imports (`import src.ollm...`) which failed when the package was loaded from the `ollm` namespace (as set up in the example scripts). These were replaced with relative imports (`from . import...`) to ensure portability and correct module resolution regardless of the execution context.
+
+Detailed Implementation Notes:
+1. Updated `src/ollm/deepseek.py`:
+   - Changed `import src.ollm.modeling_deepseek as modeling_deepseek` to `from . import modeling_deepseek`.
+   - This ensures that the monkey-patching of `DeepseekDecoderLayer` and `DeepseekModel` works correctly within the package structure.
+
+2. Updated `src/ollm/moonlight.py`:
+   - Changed `import src.ollm.modeling_moonlight as modeling_moonlight` to `from . import modeling_moonlight`.
+   - This fixes the same issue for the Moonlight model architecture, ensuring `DeepseekV3DecoderLayer` and `DeepseekV3Model` are correctly patched.
+
+Fixes & Caveats:
+- Fix: Resolved `ModuleNotFoundError: No module named 'src'` when running scripts like `scripts/example_deepseek_moe.py`.
+- Caveat: Scripts should be run from the root of the repository (where `pyproject.toml` is located) for the path setup in the examples (which append `../src`) to work correctly relative to the script location.
+- Hardware: No changes to hardware constraints. The models still require significant VRAM or RAM for offloading.
+
+Usage Instructions:
+To run the DeepSeek MoE example script:
+1. Ensure dependencies are installed: `pip install torch transformers accelerate requests`
+2. Run from the repository root:
+   ```bash
+   python3 scripts/example_deepseek_moe.py
+   ```
+   (Note: The script sets up `sys.path` automatically, so setting `PYTHONPATH` explicitly is not strictly required if running this specific script, but `export PYTHONPATH=src` is good practice for other usages).
+
+Technical Metrics:
+- Verification: Validated that the `ModuleNotFoundError` is resolved by executing the script. The script successfully proceeds to the model initialization and download phase.

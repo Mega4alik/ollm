@@ -71,7 +71,7 @@ class MyDeepseekModel(DeepseekModel):
 		return out
 
 # Monkey-patching module
-import src.ollm.modeling_deepseek as modeling_deepseek
+from . import modeling_deepseek
 modeling_deepseek.DeepseekDecoderLayer = MyDeepseekDecoderLayer
 modeling_deepseek.DeepseekModel = MyDeepseekModel
 
