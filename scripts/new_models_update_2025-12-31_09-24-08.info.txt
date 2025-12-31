@@ -1,0 +1,36 @@
+New Models Integration Update (Falcon, Qwen, DeepSeek, Moonlight)
+
+Date: 2025-12-31_09-24-08
+
+Summary:
+Added support for a suite of new models requested for the "Core Matrix" update. This includes handlers for Falcon-MoE, Qwen2.5/3, DeepSeek-MoE, and Moonlight, along with corresponding example scripts and documentation logic.
+
+Changes:
+1.  **New Model Handlers (`src/ollm/`)**:
+    *   `mixtral.py`: Handles `Falcon3-MoE-2x7B` (using Mixtral architecture).
+    *   `qwen2.py`: Handles `Qwen2.5-14B` (using Qwen2 architecture).
+    *   `qwen3.py`: New handler for `Qwen3-8B`. Uses `KVCache` pattern as requested and falls back to Qwen2 classes if Qwen3 is not natively available.
+    *   `deepseek.py`: Handles `DeepSeek-MoE-16B`. Implements dynamic wrapping for `trust_remote_code=True`.
+    *   `moonlight.py`: Handles `Moonlight-16B` (DeepSeekV3). Implements dynamic wrapping.
+    *   `mistral.py` (Existing): Reused for `Neural-Chat-MoE-v2`.
+
+2.  **Inference Updates (`src/ollm/inference.py`)**:
+    *   Registered new model IDs: `falcon-moe`, `qwen2-14b`, `qwen3-8b`, `deepseek-moe`, `moonlight-16b`, `neural-chat`.
+    *   Updated `load_model` dispatch logic to use the appropriate handlers.
+
+3.  **Example Scripts (`scripts/`)**:
+    *   Created `example_falcon3_moe.py`, `example_qwen2_14b.py`, `example_qwen3_8b.py`, `example_deepseek_moe.py`, `example_moonlight_16b.py`, `example_neural_chat.py`.
+    *   Each script includes the specific `script` and `iostat` commands for speed testing.
+
+4.  **Documentation**:
+    *   Created `documentation/speedtrails_logic.md` outlining the "Swap Ratio", "Baseline", and "Architecture Diversity" logic.
+
+Q&A:
+Q: Why is Falcon-MoE using `mixtral.py`?
+A: The Falcon3-MoE-2x7B model (often a merge or specific MoE variant) shares architectural traits with Mixtral (Sparse MoE) or uses the `MixtralForCausalLM` config in some community versions. We implemented a dedicated `mixtral` handler to support this sparse MoE block structure efficiently.
+
+Q: How are DeepSeek/Moonlight handled?
+A: These models use `trust_remote_code=True`. We implemented a dynamic wrapper that loads the remote model and then monkey-patches the layers at runtime to inject the OLLM `loaderLayer` logic, allowing offloading even for remote architectures.
+
+Q: What is the Qwen3 implementation?
+A: Since Qwen3 shares the Qwen2 architecture foundation, we use Qwen2 classes as a base but enforce the OLLM `KVCache` pattern and creating a dedicated handler to support future Qwen3-specific divergences.

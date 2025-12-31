@@ -60,7 +60,13 @@ class Inference:
 			"qwen3-next-80B": "Qwen/Qwen3-Next-80B-A3B-Instruct",
 			"gemma3-12B": "google/gemma-3-12b-it",
 			"voxtral-small-24B": "mistralai/Voxtral-Small-24B-2507",
-			"dolphin-24B": "dphn/Dolphin3.0-R1-Mistral-24B"
+			"dolphin-24B": "dphn/Dolphin3.0-R1-Mistral-24B",
+			"qwen3-8b": "mlabonne/Qwen3-8B-abliterated",
+			"qwen2-14b": "huihui-ai/Qwen2.5-14B-Instruct-Abliterated",
+			"moonlight-16b": "huihui-ai/Moonlight-16B-A3B-Instruct-abliterated",
+			"deepseek-moe": "deepseek-ai/deepseek-moe-16b-chat",
+			"neural-chat": "Intel/neural-chat-7b-v3-3",
+			"falcon-moe": "ehristoforu/Falcon3-MoE-2x7B-Insruct"
 		}
 		url = urls[self.model_id]
 		print(f"Downloading {url} ...")
@@ -68,7 +74,7 @@ class Inference:
 
 	
 	def ini_model(self, models_dir="./models/", force_download=False):
-		models_list = ["llama3-1B-chat", "llama3-3B-chat", "llama3-8B-chat", "gpt-oss-20B", "qwen3-next-80B", "gemma3-12B", "voxtral-small-24B", "dolphin-24B"]
+		models_list = ["llama3-1B-chat", "llama3-3B-chat", "llama3-8B-chat", "gpt-oss-20B", "qwen3-next-80B", "gemma3-12B", "voxtral-small-24B", "dolphin-24B", "qwen3-8b", "qwen2-14b", "moonlight-16b", "deepseek-moe", "neural-chat", "falcon-moe"]
 		if self.model_id not in models_list:
 			raise ValueError("Incorrect model id. It must be one of", models_list)
 		
@@ -111,6 +117,37 @@ class Inference:
 		elif self.model_id=="dolphin-24B":
 			from . import mistral
 			mistral.loader = SingleDenseWeightsLoader(model_dir, device=self.device) if os.path.exists(os.path.join(model_dir, "model.safetensors")) else DenseWeightsLoader(model_dir, device=self.device)
+			mistral.stats = self.stats
+			self.model = mistral.MyMistralForCausalLM.from_pretrained(model_dir, dtype=torch.bfloat16, device_map="cpu", attn_implementation=get_attn_implementation(), low_cpu_mem_usage=True, ignore_mismatched_sizes=True)
+		elif self.model_id=="falcon-moe":
+			from . import mixtral
+			mixtral.loader = DenseWeightsLoader(model_dir, device=self.device)
+			mixtral.stats = self.stats
+			self.model = mixtral.MyMixtralForCausalLM.from_pretrained(model_dir, dtype=torch.bfloat16, device_map="cpu", attn_implementation=get_attn_implementation(), low_cpu_mem_usage=True, ignore_mismatched_sizes=True)
+		elif self.model_id=="qwen2-14b":
+			from . import qwen2
+			qwen2.loader = DenseWeightsLoader(model_dir, device=self.device)
+			qwen2.stats = self.stats
+			self.model = qwen2.MyQwen2ForCausalLM.from_pretrained(model_dir, dtype=torch.bfloat16, device_map="cpu", attn_implementation=get_attn_implementation(), low_cpu_mem_usage=True, ignore_mismatched_sizes=True)
+		elif self.model_id=="qwen3-8b":
+			from . import qwen3
+			qwen3.loader = DenseWeightsLoader(model_dir, device=self.device)
+			qwen3.stats = self.stats
+			self.model = qwen3.MyQwen3ForCausalLM.from_pretrained(model_dir, dtype=torch.bfloat16, device_map="cpu", attn_implementation=get_attn_implementation(), low_cpu_mem_usage=True, ignore_mismatched_sizes=True)
+		elif self.model_id=="deepseek-moe":
+			from . import deepseek
+			deepseek.loader = DenseWeightsLoader(model_dir, device=self.device)
+			deepseek.stats = self.stats
+			# No trust_remote_code=True needed as we use local code
+			self.model = deepseek.MyDeepseekForCausalLM.from_pretrained(model_dir, dtype=torch.bfloat16, device_map="cpu", attn_implementation=get_attn_implementation(), low_cpu_mem_usage=True, ignore_mismatched_sizes=True)
+		elif self.model_id=="moonlight-16b":
+			from . import moonlight
+			moonlight.loader = DenseWeightsLoader(model_dir, device=self.device)
+			moonlight.stats = self.stats
+			self.model = moonlight.MyMoonlightForCausalLM.from_pretrained(model_dir, dtype=torch.bfloat16, device_map="cpu", attn_implementation=get_attn_implementation(), low_cpu_mem_usage=True, ignore_mismatched_sizes=True)
+		elif self.model_id=="neural-chat":
+			from . import mistral
+			mistral.loader = DenseWeightsLoader(model_dir, device=self.device)
 			mistral.stats = self.stats
 			self.model = mistral.MyMistralForCausalLM.from_pretrained(model_dir, dtype=torch.bfloat16, device_map="cpu", attn_implementation=get_attn_implementation(), low_cpu_mem_usage=True, ignore_mismatched_sizes=True)
 		else:
