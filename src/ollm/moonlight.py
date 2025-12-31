@@ -69,7 +69,7 @@ class MyDeepseekV3Model(DeepseekV3Model):
 		return out
 
 # Monkey-patching module
-import src.ollm.modeling_moonlight as modeling_moonlight
+from . import modeling_moonlight
 modeling_moonlight.DeepseekV3DecoderLayer = MyDeepseekV3DecoderLayer
 modeling_moonlight.DeepseekV3Model = MyDeepseekV3Model
 
