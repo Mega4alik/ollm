@@ -1,0 +1,37 @@
+import sys
+import cupy as cp
+import kvikio
+import time
+import os
+
+# Setup path on your NVMe
+path = '//home/phil2/ollm_env/data_slave1/AI-CLUSTER/final_test.bin'
+os.makedirs(os.path.dirname(path), exist_ok=True)
+size = 1024 * 1024 * 1024 # 1GB
+
+try:
+    if not os.path.exists(path):
+        with open(path, 'wb') as f: f.write(os.urandom(size))
+
+    print('\n' + '='*50)
+    print('--- FINAL CLUSTER PERFORMANCE VERIFICATION ---')
+    print('='*50)
+
+    f = kvikio.CuFile(path, 'r')
+    for i in range(cp.cuda.runtime.getDeviceCount()):
+        with cp.cuda.Device(i):
+            name = cp.cuda.runtime.getDeviceProperties(i)['name'].decode()
+            buf = cp.empty(size, dtype='u1')
+            f.read(buf) # Warmup
+            
+            start = time.time()
+            f.read(buf)
+            cp.cuda.stream.get_current_stream().synchronize()
+            end = time.time()
+            
+            speed = (size / 1024**3) / (end - start)
+            print(f'GPU {i} ({name:22}): {speed:6.2f} GiB/s')
+    f.close()
+finally:
+    if os.path.exists(path): os.remove(path)
+"
