@@ -37,6 +37,7 @@ from transformers.modeling_attn_mask_utils import (
     _prepare_4d_causal_attention_mask_for_sdpa,
 )
 from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast, SequenceClassifierOutputWithPast
+from transformers.generation import GenerationMixin
 from transformers.modeling_utils import PreTrainedModel
 from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS, is_torch_greater_or_equal_than_1_13
 from transformers.utils import (
@@ -1249,7 +1250,7 @@ class DeepseekModel(DeepseekPreTrainedModel):
         )
 
 
-class DeepseekForCausalLM(DeepseekPreTrainedModel):
+class DeepseekForCausalLM(DeepseekPreTrainedModel, GenerationMixin):
     _tied_weights_keys = ["lm_head.weight"]
 
     def __init__(self, config):

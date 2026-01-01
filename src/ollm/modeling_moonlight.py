@@ -41,6 +41,7 @@ from transformers.modeling_outputs import (
     CausalLMOutputWithPast,
     SequenceClassifierOutputWithPast,
 )
+from transformers.generation import GenerationMixin
 from transformers.modeling_utils import PreTrainedModel
 from transformers.pytorch_utils import (
     ALL_LAYERNORM_LAYERS,
@@ -1513,7 +1514,7 @@ class DeepseekV3Model(DeepseekV3PreTrainedModel):
         )
 
 
-class DeepseekV3ForCausalLM(DeepseekV3PreTrainedModel):
+class DeepseekV3ForCausalLM(DeepseekV3PreTrainedModel, GenerationMixin):
     _tied_weights_keys = ["lm_head.weight"]
 
     def __init__(self, config):
