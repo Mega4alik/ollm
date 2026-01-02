@@ -1,0 +1,41 @@
+# Verifying Kvikio bfloat16 Support
+
+This document outlines how to verify that the `bfloat16` to `int16` bit-casting workaround for Kvikio/CuPy is functioning correctly.
+
+## The Potential Issue
+
+CuPy does not natively support `bfloat16`. To allow `kvikio` (which uses CuPy) to save/load DeepSeek's `bfloat16` KV cache, we treat the data as `int16` (preserving the 16-bit binary representation).
+
+If there is a mismatch in how these bits are interpreted (e.g., treating signed `int16` bits as unsigned `uint16` or vice versa during the view-casting), the resulting floating-point numbers will be corrupted. This typically results in:
+*   **NaNs (Not a Number):** The model output becomes gibberish or repeats `NaN`.
+*   **Infs (Infinity):** Values explode to infinity.
+*   **Garbage Output:** The text generation is completely incoherent immediately after loading from disk.
+
+## Verification Steps
+
+To ensure the fix works, you do not need complex unit tests. You can verify it by observing the model's behavior during inference.
+
+1.  **Run the Inference Script:**
+    Execute the DeepSeek example script that triggers the disk offload/reload cycle.
+    ```bash
+    python3 scripts/example_deepseek_moe.py
+    ```
+
+2.  **Monitor the Output:**
+    *   **Success:** The generated text is coherent English (e.g., "Mercury, Venus, Earth...").
+    *   **Failure:** The output contains symbols like ``, repeats nonsense, or the script crashes with floating-point errors.
+
+3.  **Advanced Debugging (Optional):**
+    If you suspect issues, you can temporarily modify `src/ollm/kvcache.py` to inspect the loaded tensors.
+
+    In `load_from_disk_kvikio`, before returning `(k, v)`, add:
+    ```python
+    # DEBUG CHECK
+    if torch.isnan(k).any() or torch.isinf(k).any() or k.abs().max() > 65504:
+        print(f"!! WARNING: Layer {layer_idx} Key Cache contains NaNs/Infs or huge values!")
+
+    if torch.isnan(v).any() or torch.isinf(v).any() or v.abs().max() > 65504:
+        print(f"!! WARNING: Layer {layer_idx} Value Cache contains NaNs/Infs or huge values!")
+    ```
+
+    If these warnings trigger immediately after loading, the `int16` view logic may need adjustment (though `int16` is the standard container for `bfloat16` bits in PyTorch interop).

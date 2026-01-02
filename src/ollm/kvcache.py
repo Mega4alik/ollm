@@ -68,14 +68,23 @@ class oCache:
 			# Zero-copy write from GPU tensor
 			# We need to ensure tensor is contiguous
 			if not k.is_contiguous(): k = k.contiguous()
+
 			# Convert to CuPy via DLPack to get buffer interface
-			cupy_k = cp.from_dlpack(to_dlpack(k))
+			# Handle bfloat16 by viewing as int16 (preserving bits) since CuPy doesn't support bfloat16
+			if k.dtype == torch.bfloat16:
+				cupy_k = cp.from_dlpack(to_dlpack(k.view(torch.int16)))
+			else:
+				cupy_k = cp.from_dlpack(to_dlpack(k))
 			f.write(cupy_k)
 
 		# Save V
 		with kvikio.CuFile(v_path, "w") as f:
 			if not v.is_contiguous(): v = v.contiguous()
-			cupy_v = cp.from_dlpack(to_dlpack(v))
+
+			if v.dtype == torch.bfloat16:
+				cupy_v = cp.from_dlpack(to_dlpack(v.view(torch.int16)))
+			else:
+				cupy_v = cp.from_dlpack(to_dlpack(v))
 			f.write(cupy_v)
 
 		if self.stats: self.stats.set("kvsave_gds", t1)
@@ -97,16 +106,16 @@ class oCache:
 			# This is slightly hacky for dtype size, assuming bfloat16/float16 = 2 bytes
 			# Use numpy/cupy to determine size if possible, or mapping
 			dtype_map = {
-				"torch.float16": cp.float16, "torch.bfloat16": cp.uint16, # cupy doesn't fully support bf16 IO sometimes, treat as uint16
+				"torch.float16": cp.float16, "torch.bfloat16": cp.int16, # cupy doesn't fully support bf16 IO sometimes, treat as int16
 				"torch.float32": cp.float32
 			}
 			# Fallback for bf16 string if different
 			cp_dtype = dtype_map.get(dtype_str, cp.float16)
 
-			# If it's bfloat16, we treat it as uint16 for raw IO to avoid casting issues,
+			# If it's bfloat16, we treat it as int16 for raw IO to avoid casting issues,
 			# then reinterpret in Torch.
 			is_bf16 = "bfloat16" in dtype_str
-			if is_bf16: cp_dtype = cp.uint16
+			if is_bf16: cp_dtype = cp.int16
 
 			n_elems = 1
 			for s in shape: n_elems *= s
