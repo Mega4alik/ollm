@@ -1,0 +1,26 @@
+Summary of Changes:
+Added debugging and fallback logic to `src/ollm/kvcache.py` to address the `AttributeError: 'KVCache' object has no attribute 'key_cache'`.
+
+Detailed Implementation Notes:
+1. **Debug Logging:**
+   - Added a check `if not hasattr(self, "key_cache"):`.
+   - If true, prints `DEBUG: KVCache missing key_cache. Attributes: {dir(self)}` to standard output. This will allow identification of the correct storage attribute used by the installed version of `transformers.DynamicCache`.
+
+2. **Conditional Clearing:**
+   - Changed the memory clearing logic to be conditional:
+     - If `key_cache` exists, clear `self.key_cache[layer_idx]`.
+     - Else if `layers` exists (legacy fallback), clear `self.layers[layer_idx].keys/values`.
+   - This prevents the script from crashing due to the missing attribute, while still attempting to prevent OOM if a known attribute is found.
+
+Fixes & Caveats:
+- Fix: Prevents immediate crash on `AttributeError`.
+- Caveat: If neither `key_cache` nor `layers` contains the actual high-memory tensors, OOM may still occur eventually. The debug log is needed to confirm the correct target.
+
+Usage Instructions:
+No changes to usage. Run the example script as before:
+```bash
+python3 scripts/example_deepseek_moe.py
+```
+
+Technical Metrics:
+- Confirmed syntax validity of the patch.
