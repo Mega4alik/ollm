@@ -34,6 +34,10 @@ class KVCache(DynamicCache, oCache): #DiskCache
 		super().__init__()		
 		self.ini_ocache(cache_dir, device, stats)
 
+	@property
+	def seen_tokens(self):
+		return self.get_seq_length()
+
 	def update(
 		self,
 		key_states: torch.Tensor,

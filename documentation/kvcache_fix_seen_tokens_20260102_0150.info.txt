@@ -1,0 +1,20 @@
+Summary of Changes:
+Resolved `AttributeError: 'KVCache' object has no attribute 'seen_tokens'` which occurred during `modeling_deepseek.py` execution. This was caused by the custom `KVCache` class (inheriting from `DynamicCache`) missing the `seen_tokens` attribute that the DeepSeek model code explicitly accesses.
+
+Detailed Implementation Notes:
+1. Updated `src/ollm/kvcache.py`:
+   - Added a `@property` named `seen_tokens` to the `KVCache` class.
+   - This property maps to `self.get_seq_length()`, ensuring that the model can retrieve the sequence length using the `.seen_tokens` attribute as expected.
+
+Fixes & Caveats:
+- Fix: The DeepSeek model's `prepare_inputs_for_generation` method can now access `past_key_values.seen_tokens` without crashing.
+- Caveat: This fix assumes that `seen_tokens` is equivalent to `get_seq_length()` for the usage context in `ollm`. In standard `DynamicCache`, these are generally consistent.
+
+Usage Instructions:
+No changes to usage. Run the example script as before:
+```bash
+python3 scripts/example_deepseek_moe.py
+```
+
+Technical Metrics:
+- Confirmed fix by ensuring the `KVCache` class now has the `seen_tokens` attribute.
