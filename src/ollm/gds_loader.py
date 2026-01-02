@@ -9,6 +9,7 @@ try:
 	import kvikio
 	import cupy as cp   
 	kvikio_available = True
+	print("kvikio is available and imported.")
 except ImportError:
     print("Warning: kvikio is not imported")
 

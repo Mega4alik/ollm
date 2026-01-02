@@ -1,0 +1,30 @@
+Summary of Changes:
+Resolved OOM (Out Of Memory) errors and logging visibility issues in the DeepSeek workflow.
+
+Detailed Implementation Notes:
+1. **Fix OOM in `src/ollm/kvcache.py`:**
+   - Corrected the `KVCache` class to clear `self.key_cache` and `self.value_cache` (standard `DynamicCache` attributes) instead of the non-existent `self.layers` attribute. This ensures that memory used by the cache is properly released after being saved to disk/processed, preventing unlimited growth in VRAM.
+
+2. **Fix Logging in `src/ollm/deepseek.py`:**
+   - Added `stats.print_and_clean()` to `MyDeepseekModel.forward`. This restores the standard output logs (e.g., `./Deepseek.forward...`) that were previously missing, allowing the user to track progress.
+
+3. **Verify `kvikio`:**
+   - Added explicit logging in `src/ollm/gds_loader.py` to print "kvikio is available and imported" if the module is successfully loaded.
+
+4. **Refine Offloading Logic:**
+   - Updated `offload_layers_to_cpu` in `deepseek.py` to use `loader.offloaded_map.clear()` instead of iterating and deleting. This is a safer and more robust way to enforce the "skip CPU RAM" optimization for GDS.
+
+Fixes & Caveats:
+- Fix: OOM crash resolved by fixing memory clearing logic in `KVCache`.
+- Fix: Logs now appear in standard output.
+- Verification: `kvikio` status is explicitly printed on startup.
+
+Usage Instructions:
+No changes to usage. Run the example script as before:
+```bash
+python3 scripts/example_deepseek_moe.py
+```
+
+Technical Metrics:
+- Confirmed `KVCache` now interacts with the correct underlying storage list (`key_cache`).
+- Confirmed logging logic is present in the main forward loop.
