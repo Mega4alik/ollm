@@ -1,0 +1,25 @@
+Summary of Changes:
+Resolved `AttributeError: 'KVCache' object has no attribute 'key_cache'` by identifying that the `DynamicCache` implementation in this environment uses `self.layers` instead of `self.key_cache`.
+
+Detailed Implementation Notes:
+1. **Debug & Discovery:**
+   - Debugging output revealed that `dir(self)` on the `KVCache` object contained `layers` but not `key_cache`. This indicates the installed `transformers` library (likely a dev version or specific fork) uses a `layers` attribute for storage in `DynamicCache`.
+
+2. **Fixed `src/ollm/kvcache.py`:**
+   - Reverted the loading logic to use `self.layers[layer_idx].keys` and `values` instead of `self.key_cache`.
+   - Applied this change to both the *loading* block (pre-update) and the *cleanup* block (post-update).
+   - Removed temporary debug print statements.
+   - Used `if hasattr(self, "layers"):` for the cleanup step to ensure robustness.
+
+Fixes & Caveats:
+- Fix: The script now runs past the cache update step without `AttributeError`.
+- Caveat: OOM (Out of Memory) risk remains if `self.layers` clearing is insufficient or if `key_cache2` (which accumulates generated tokens in VRAM) grows too large for the GPU. The current design prioritizes functionality (running without crashing) over aggressive VRAM saving for the generation cache.
+
+Usage Instructions:
+No changes to usage. Run the example script as before:
+```bash
+python3 scripts/example_deepseek_moe.py
+```
+
+Technical Metrics:
+- Confirmed `self.layers` is the correct attribute for cache storage in this environment.
