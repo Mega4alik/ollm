@@ -163,9 +163,30 @@ class KVCache(DynamicCache, oCache): #DiskCache
 
 		# Standard DynamicCache implementation
 		tensors = self.load_from_disk(layer_idx)
+		is_prefill = key_states.shape[-2] > 1
+
 		if tensors is not None:
 			self.key_cache[layer_idx], self.value_cache[layer_idx] = tensors
-			if layer_idx < len(self.key_cache2):
+
+			if is_prefill:
+				# If we loaded the prompt from disk, and we are pre-filling again (key_states is the prompt),
+				# we should NOT append key_states to the loaded tensors, as they are likely identical.
+				# We just use the disk version.
+
+				# Initialize key_cache2 to empty if needed, as we are starting generation from here.
+				if layer_idx >= len(self.key_cache2):
+					self.key_cache2.append(torch.empty(0, device=key_states.device, dtype=key_states.dtype))
+					self.value_cache2.append(torch.empty(0, device=value_states.device, dtype=value_states.dtype))
+				else:
+					self.key_cache2[layer_idx] = torch.empty(0, device=key_states.device, dtype=key_states.dtype)
+					self.value_cache2[layer_idx] = torch.empty(0, device=value_states.device, dtype=value_states.dtype)
+
+				# Skip super().update() to prevent duplication of the prompt tokens.
+				# We return the loaded cache directly.
+				# We must ensure to return the expected tensors
+				return self.key_cache[layer_idx], self.value_cache[layer_idx]
+
+			elif layer_idx < len(self.key_cache2):
 				self.key_cache[layer_idx] = torch.cat([self.key_cache[layer_idx], self.key_cache2[layer_idx]], dim=-2)
 				self.value_cache[layer_idx] = torch.cat([self.value_cache[layer_idx], self.value_cache2[layer_idx]], dim=-2)
 
