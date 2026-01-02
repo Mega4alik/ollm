@@ -54,10 +54,10 @@ class KVCache(DynamicCache, oCache): #DiskCache
 	) -> Tuple[torch.Tensor, torch.Tensor]:
 		tensors = self.load_from_disk(layer_idx)
 		if tensors is not None:
-			self.key_cache[layer_idx], self.value_cache[layer_idx] = tensors
+			self.layers[layer_idx].keys, self.layers[layer_idx].values = tensors
 			if layer_idx < len(self.key_cache2):
-				self.key_cache[layer_idx] = torch.cat([self.key_cache[layer_idx], self.key_cache2[layer_idx]], dim=-2)
-				self.value_cache[layer_idx] = torch.cat([self.value_cache[layer_idx], self.value_cache2[layer_idx]], dim=-2)
+				self.layers[layer_idx].keys = torch.cat([self.layers[layer_idx].keys, self.key_cache2[layer_idx]], dim=-2)
+				self.layers[layer_idx].values = torch.cat([self.layers[layer_idx].values, self.value_cache2[layer_idx]], dim=-2)
 				self.key_cache2[layer_idx] = torch.cat([self.key_cache2[layer_idx], key_states], dim=-2)
 				self.value_cache2[layer_idx] = torch.cat([self.value_cache2[layer_idx], value_states], dim=-2)				
 			else:
@@ -68,14 +68,7 @@ class KVCache(DynamicCache, oCache): #DiskCache
 		if tensors is None: self.save_to_disk(out, layer_idx) #save only first time cause it's slow to save
 
 		# Clear memory to prevent OOM
-		# DEBUG: Print attributes to identify correct storage location if key_cache is missing
-		if not hasattr(self, "key_cache"):
-			print(f"DEBUG: KVCache missing key_cache. Attributes: {dir(self)}")
-
-		if hasattr(self, "key_cache") and layer_idx < len(self.key_cache):
-			self.key_cache[layer_idx] = torch.empty(0)
-			self.value_cache[layer_idx] = torch.empty(0)
-		elif hasattr(self, "layers"): # Fallback to legacy/custom attribute if it exists
+		if hasattr(self, "layers"):
 			self.layers[layer_idx].keys, self.layers[layer_idx].values = torch.empty(0), torch.empty(0)
 
 		return out
