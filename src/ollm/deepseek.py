@@ -65,9 +65,8 @@ class MyDeepseekModel(DeepseekModel):
 		elif len(args) > 0 and args[0] is not None: # input_ids
 			self.embed_tokens.to(args[0].device)
 
-		self.embed_tokens.cpu()
 		out = super().forward(*args, **kwargs)
-		self.embed_tokens.to(out.last_hidden_state.device)
+		self.embed_tokens.cpu()
 		return out
 
 # Monkey-patching module
