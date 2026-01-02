@@ -66,6 +66,7 @@ class MyDeepseekModel(DeepseekModel):
 			self.embed_tokens.to(args[0].device)
 
 		out = super().forward(*args, **kwargs)
+		if stats: print("./Deepseek.forward.", datetime.now().strftime("%H:%M:%S"), stats.print_and_clean() if stats else "")
 		return out
 
 # Monkey-patching module
@@ -84,9 +85,12 @@ class oForGeneration:
 		for layer_idx in range(min(layers_num, self.num_hidden_layers)):
 			base = f"model.layers.{layer_idx}."
 			loader.preload_layer_safetensors(base)
-			#loader.offload_dict_to_gpu_cpu(base, gpu=False)
-			if hasattr(loader, "offloaded_map") and base in loader.offloaded_map:
-				del loader.offloaded_map[base]
+			#loader.offload_dict_to_gpu_cpu(base, gpu=False) # Skip CPU load for GDS
+
+		# Ensure we don't hold onto memory if switching modes, but avoid aggressive deletion if it breaks things
+		if hasattr(loader, "offloaded_map"):
+			loader.offloaded_map.clear() # Clear all CPU cache to be safe
+
 		torch.cuda.empty_cache()
 		print(f"./finished offloading layers to CPU {layers_num}/{self.num_hidden_layers}")
 

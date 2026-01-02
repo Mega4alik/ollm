@@ -54,10 +54,10 @@ class KVCache(DynamicCache, oCache): #DiskCache
 	) -> Tuple[torch.Tensor, torch.Tensor]:
 		tensors = self.load_from_disk(layer_idx)
 		if tensors is not None:
-			self.layers[layer_idx].keys, self.layers[layer_idx].values = tensors
+			self.key_cache[layer_idx], self.value_cache[layer_idx] = tensors
 			if layer_idx < len(self.key_cache2):
-				self.layers[layer_idx].keys = torch.cat([self.layers[layer_idx].keys, self.key_cache2[layer_idx]], dim=-2)
-				self.layers[layer_idx].values = torch.cat([self.layers[layer_idx].values, self.value_cache2[layer_idx]], dim=-2)
+				self.key_cache[layer_idx] = torch.cat([self.key_cache[layer_idx], self.key_cache2[layer_idx]], dim=-2)
+				self.value_cache[layer_idx] = torch.cat([self.value_cache[layer_idx], self.value_cache2[layer_idx]], dim=-2)
 				self.key_cache2[layer_idx] = torch.cat([self.key_cache2[layer_idx], key_states], dim=-2)
 				self.value_cache2[layer_idx] = torch.cat([self.value_cache2[layer_idx], value_states], dim=-2)				
 			else:
@@ -66,7 +66,11 @@ class KVCache(DynamicCache, oCache): #DiskCache
 		
 		out = super().update(key_states, value_states, layer_idx, cache_kwargs) #tuple of (self.key_cache[layer_idx], self.value_cache[layer_idx])		
 		if tensors is None: self.save_to_disk(out, layer_idx) #save only first time cause it's slow to save
-		self.layers[layer_idx].keys, self.layers[layer_idx].values = torch.empty(0), torch.empty(0)
+
+		# Clear memory to prevent OOM
+		if layer_idx < len(self.key_cache):
+			self.key_cache[layer_idx] = torch.empty(0)
+			self.value_cache[layer_idx] = torch.empty(0)
 		return out
 
 
