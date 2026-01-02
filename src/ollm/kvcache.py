@@ -41,6 +41,10 @@ class KVCache(DynamicCache, oCache): #DiskCache
 	def get_max_length(self) -> Optional[int]:
 		return None
 
+	def get_usable_length(self, new_seq_length: int, layer_idx: Optional[int] = None) -> int:
+		# Since max_length is None, we just return the new sequence length
+		return new_seq_length
+
 	def update(
 		self,
 		key_states: torch.Tensor,

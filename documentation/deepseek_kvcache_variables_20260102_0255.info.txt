@@ -1,0 +1,29 @@
+Summary of Changes:
+Resolved a series of `AttributeError`s in `modeling_deepseek.py` caused by the custom `KVCache` class missing standard methods expected by the model architecture. The latest fix adds `get_usable_length` to `KVCache`.
+
+Variable Dictionary & Ghost Variables:
+The DeepSeek model implementation (derived from Hugging Face transformers) expects the `past_key_values` object (instance of `KVCache`) to implement the standard `Cache` interface. The following "ghost variables" (missing attributes/methods) were identified and fixed:
+
+1. `seen_tokens` (Property)
+   - **Purpose:** Used by the model to determine the number of tokens already processed and stored in the cache.
+   - **Fix:** Mapped to `self.get_seq_length()`.
+   - **Location:** `src/ollm/kvcache.py`
+
+2. `get_max_length()` (Method)
+   - **Purpose:** Used by the model to check the maximum capacity of the cache (e.g., for sliding window attention).
+   - **Fix:** Implemented to return `None` (indicating infinite/unlimited capacity for this implementation).
+   - **Location:** `src/ollm/kvcache.py`
+
+3. `get_usable_length(new_seq_length, layer_idx)` (Method)
+   - **Purpose:** Used to determine how many new tokens can be added or attended to, typically handling cache eviction logic.
+   - **Fix:** Implemented to return `new_seq_length` (consistent with unlimited max length).
+   - **Location:** `src/ollm/kvcache.py`
+
+Data Flow in `scripts/example_deepseek_moe.py`:
+- `past_key_values` is initialized as `o.DiskCache(...)` -> `KVCache`.
+- `model.generate(...)` is called with `past_key_values`.
+- Inside generation, `prepare_inputs_for_generation` calls these methods on `past_key_values` to set up attention masks and position IDs.
+- Data flows from `input_ids` -> `prepare_inputs_for_generation` -> `KVCache` methods -> `attention_mask` / `position_ids`.
+
+Is this error different?
+Yes, strictly speaking, it is a different error (`get_usable_length` vs `get_max_length`). However, it stems from the exact same root cause: the `KVCache` class was implementing an older or incomplete version of the `transformers.Cache` interface while the `modeling_deepseek.py` code expected a newer, more complete interface. Fixing one often reveals the next missing method in the execution path.
