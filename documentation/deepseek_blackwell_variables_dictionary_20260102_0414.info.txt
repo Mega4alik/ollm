@@ -1,0 +1,28 @@
+Summary of Changes:
+Data Dictionary and Verification of Variables for the DeepSeek "Blackwell-Optimized" workflow. This document explicitly lists the real variables involved in the data flow, their storage locations, and their lifecycles, ensuring no "ghost" variables are assumed.
+
+Data Dictionary: DeepSeek Blackwell Optimization
+
+| Variable Name | Type | Location (Device) | Role & Lifecycle |
+| :--- | :--- | :--- | :--- |
+| **`loader`** | `DenseWeightsLoader` (or subclass) | CPU (Host) | Global singleton managing weight I/O. Exists throughout the process. |
+| **`loader.offloaded_map`** | `dict` | CPU RAM | Stores weights offloaded to CPU. **Crucial:** In the optimized flow, this is explicitly CLEARED (`del`) to prevent CPU RAM caching and enforce GDS. |
+| **`loader.safetensors`** | `dict` | CPU / Disk Handle | Maps filenames to `SafeTensorReaderGPU` instances (`kvikio`). Kept open to allow fast file seeking during `load_dict_to_cuda`. |
+| **`self.embed_tokens`** | `torch.nn.Embedding` | **GPU (Pinned)** | The embedding layer. **Stationary:** Now permanently resides on GPU (`cuda:0`), never moved to CPU during `forward()`. |
+| **`self.layers`** | `torch.nn.ModuleList` | Meta / GPU | The list of decoder layers. Initially "unloaded" (meta tensors). Individual layers are loaded to GPU on-demand and unloaded immediately after. |
+| **`base`** | `str` | N/A | String key (e.g., `model.layers.0.`) used to look up weights in `loader`. Real variable derived from layer index. |
+| **`loader.manifest`** | `dict` | CPU RAM | Static map of weight names to file locations. Read-only. |
+
+Data Flow Verification:
+1. **Stationary Path:**
+   - `input_ids` (GPU) -> `self.embed_tokens` (GPU) -> `inputs_embeds` (GPU).
+   - **Verification:** Code modification in `deepseek.py` removed `.cpu()` calls for `embed_tokens`.
+
+2. **Flowing Path (GDS):**
+   - `offload_layers_to_cpu` -> Clears `loader.offloaded_map` -> Calls `empty_cache()`.
+   - `forward()` -> `layer` -> `_load_layer_weights()` -> `loader.load_dict_to_cuda()`.
+   - `load_dict_to_cuda` checks `offloaded_map` (Empty/Miss) -> Calls `load_dict_from_disk()`.
+   - `load_dict_from_disk` uses `kvikio` (if installed) -> Streams directly to GPU.
+   - **Verification:** "Ghost" usage of CPU RAM is eliminated by the `del` statement in `offload_layers_to_cpu`.
+
+This dictionary confirms that all critical data structures (`embed_tokens`, `offloaded_map`, `safetensors`) are real, existing attributes in the codebase (`deepseek.py`, `gds_loader.py`) and are being manipulated according to the Blackwell optimization plan.
