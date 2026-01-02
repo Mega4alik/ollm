@@ -173,17 +173,27 @@ class KVCache(DynamicCache, oCache): #DiskCache
 				self.key_cache2[layer_idx] = torch.cat([self.key_cache2[layer_idx], key_states], dim=-2)
 				self.value_cache2[layer_idx] = torch.cat([self.value_cache2[layer_idx], value_states], dim=-2)
 			else:
+				# We loaded from disk, but have no memory cache yet.
+				# Start accumulating new tokens here.
 				self.key_cache2.append(key_states)
 				self.value_cache2.append(value_states)
 
 		out = super().update(key_states, value_states, layer_idx, cache_kwargs)
 
 		if tensors is None:
+			# Pre-fill Phase: Save the computed prompt cache to disk
 			self.save_to_disk(out, layer_idx)
-			# Init in-memory cache with empty if needed
+
+			# IMPORTANT: Do NOT append the prompt to key_cache2 if we just saved it to disk.
+			# We want key_cache2 to only hold tokens generated AFTER this point.
+			# Initialize with EMPTY tensors for consistency so subsequent updates can append.
 			if layer_idx >= len(self.key_cache2):
 				self.key_cache2.append(torch.empty(0, device=key_states.device, dtype=key_states.dtype))
 				self.value_cache2.append(torch.empty(0, device=value_states.device, dtype=value_states.dtype))
+			else:
+				# If it already exists (unlikely in pre-fill, but safety first), reset it.
+				self.key_cache2[layer_idx] = torch.empty(0, device=key_states.device, dtype=key_states.dtype)
+				self.value_cache2[layer_idx] = torch.empty(0, device=value_states.device, dtype=value_states.dtype)
 
 		# Clear VRAM
 		self.key_cache[layer_idx], self.value_cache[layer_idx] = torch.empty(0), torch.empty(0)
@@ -208,9 +218,13 @@ class KVCache(DynamicCache, oCache): #DiskCache
 
 		if tensors is None:
 			self.save_to_disk(out, layer_idx)
+			# Prevent duplication: Initialize memory buffer as empty, since prompt is on disk.
 			if layer_idx >= len(self.key_cache2):
 				self.key_cache2.append(torch.empty(0, device=key_states.device, dtype=key_states.dtype))
 				self.value_cache2.append(torch.empty(0, device=value_states.device, dtype=value_states.dtype))
+			else:
+				self.key_cache2[layer_idx] = torch.empty(0, device=key_states.device, dtype=key_states.dtype)
+				self.value_cache2[layer_idx] = torch.empty(0, device=value_states.device, dtype=value_states.dtype)
 
 		# Clear VRAM
 		self.layers[layer_idx].keys, self.layers[layer_idx].values = torch.empty(0), torch.empty(0)
