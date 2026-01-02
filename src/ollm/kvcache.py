@@ -55,19 +55,41 @@ class KVCache(DynamicCache, oCache): #DiskCache
 		tensors = self.load_from_disk(layer_idx)
 		if tensors is not None:
 			self.layers[layer_idx].keys, self.layers[layer_idx].values = tensors
+			# Only append in-memory cache if it exists (meaning we are in decoding phase and have history)
 			if layer_idx < len(self.key_cache2):
 				self.layers[layer_idx].keys = torch.cat([self.layers[layer_idx].keys, self.key_cache2[layer_idx]], dim=-2)
 				self.layers[layer_idx].values = torch.cat([self.layers[layer_idx].values, self.value_cache2[layer_idx]], dim=-2)
+
+				# Update the in-memory cache with the NEW token only
 				self.key_cache2[layer_idx] = torch.cat([self.key_cache2[layer_idx], key_states], dim=-2)
 				self.value_cache2[layer_idx] = torch.cat([self.value_cache2[layer_idx], value_states], dim=-2)				
 			else:
+				# This case should ideally not happen if logic is correct, but if it does,
+				# it implies we loaded from disk but have no memory cache initialized for this layer yet.
+				# Initialize it with the current (new) states.
 				self.key_cache2.append(key_states)
 				self.value_cache2.append(value_states)
 		
-		out = super().update(key_states, value_states, layer_idx, cache_kwargs) #tuple of (self.key_cache[layer_idx], self.value_cache[layer_idx])		
-		if tensors is None: self.save_to_disk(out, layer_idx) #save only first time cause it's slow to save
+		# Call parent update.
+		# Note: If tensors was None (Pre-fill), self.layers is empty, so out = key_states.
+		# If tensors was Loaded, self.layers = Disk + Mem. out = Disk + Mem + key_states.
+		out = super().update(key_states, value_states, layer_idx, cache_kwargs)
+
+		if tensors is None:
+			# Pre-fill phase: Save the full initial prompt to disk.
+			self.save_to_disk(out, layer_idx)
+			# Ensure we initialize the in-memory cache lists with empty placeholders or the next tokens
+			# so that subsequent updates know to append.
+			# Actually, we DON'T want to put the pre-fill into key_cache2, because it's on disk.
+			# We just want key_cache2 to hold future tokens.
+			if layer_idx >= len(self.key_cache2):
+				self.key_cache2.append(torch.empty(0, device=key_states.device, dtype=key_states.dtype))
+				self.value_cache2.append(torch.empty(0, device=value_states.device, dtype=value_states.dtype))
 
 		# Clear memory to prevent OOM
+		# We must ensure we don't clear the references we just returned if they are needed immediately,
+		# but DynamicCache usually returns references to the storage.
+		# However, in this "Flowing" setup, we rely on reloading next time.
 		if hasattr(self, "layers"):
 			self.layers[layer_idx].keys, self.layers[layer_idx].values = torch.empty(0), torch.empty(0)
 
