@@ -38,6 +38,9 @@ class KVCache(DynamicCache, oCache): #DiskCache
 	def seen_tokens(self):
 		return self.get_seq_length()
 
+	def get_max_length(self) -> Optional[int]:
+		return None
+
 	def update(
 		self,
 		key_states: torch.Tensor,
