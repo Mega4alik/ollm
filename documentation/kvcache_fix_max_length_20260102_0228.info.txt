@@ -1,0 +1,20 @@
+Summary of Changes:
+Resolved `AttributeError: 'KVCache' object has no attribute 'get_max_length'` which occurred during `modeling_deepseek.py` execution. This was caused by the custom `KVCache` class missing the `get_max_length` method that the DeepSeek model code explicitly calls.
+
+Detailed Implementation Notes:
+1. Updated `src/ollm/kvcache.py`:
+   - Added a `get_max_length(self) -> Optional[int]` method to the `KVCache` class.
+   - This method returns `None`, indicating that the cache does not have a fixed maximum length limit, which allows the DeepSeek model logic to proceed correctly (it handles `None` gracefully).
+
+Fixes & Caveats:
+- Fix: The DeepSeek model's `prepare_inputs_for_generation` method can now call `past_key_values.get_max_length()` without crashing.
+- Caveat: This method is only added to `KVCache` and affects models using this specific cache implementation (like DeepSeek in this project). Other models using different cache mechanisms are unaffected.
+
+Usage Instructions:
+No changes to usage. Run the example script as before:
+```bash
+python3 scripts/example_deepseek_moe.py
+```
+
+Technical Metrics:
+- Confirmed fix by ensuring the `KVCache` class now has the `get_max_length` method.
