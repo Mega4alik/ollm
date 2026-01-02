@@ -1,0 +1,48 @@
+# CuPy Verification
+
+This document outlines how to verify if CuPy is properly installed and bound to the CUDA environment.
+
+## Verification Script
+
+Run the following Python script to check CuPy functionality:
+
+```python
+import sys
+try:
+    import cupy as cp
+    import torch
+
+    print(f"CuPy version: {cp.__version__}")
+    print(f"CUDA version (CuPy): {cp.cuda.runtime.runtimeGetVersion()}")
+
+    # Create a small array on GPU
+    x_gpu = cp.array([1, 2, 3], dtype=cp.float32)
+    print(f"Created CuPy array on GPU: {x_gpu}")
+
+    # Verify interaction with Torch (DLPack)
+    from torch.utils.dlpack import from_dlpack, to_dlpack
+
+    # Torch to CuPy
+    t = torch.tensor([10, 20], device="cuda")
+    c = cp.from_dlpack(to_dlpack(t))
+    print(f"Torch to CuPy: {c}")
+
+    # CuPy to Torch
+    t2 = from_dlpack(c.toDlpack())
+    print(f"CuPy to Torch: {t2}")
+
+    print("\nSUCCESS: CuPy is working correctly!")
+
+except ImportError as e:
+    print(f"ERROR: CuPy is not installed or import failed: {e}")
+except Exception as e:
+    print(f"ERROR: CuPy verification failed: {e}")
+```
+
+## Running the verification
+
+1. Save the code above to a file, e.g., `verify_cupy.py`.
+2. Run it with your python environment:
+   ```bash
+   python verify_cupy.py
+   ```
