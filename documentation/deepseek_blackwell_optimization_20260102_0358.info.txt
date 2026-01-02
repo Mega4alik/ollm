@@ -1,0 +1,28 @@
+Summary of Changes:
+Optimized the DeepSeek model workflow for "Blackwell" architecture and `kvikio` integration. This involves two key changes in `src/ollm/deepseek.py`: pinning embeddings to GPU and replacing CPU offloading with direct GPU-Disk streaming logic.
+
+Detailed Implementation Notes:
+1. **Stationary Embeddings:**
+   - Removed `self.embed_tokens.cpu()` from `MyDeepseekModel.forward`.
+   - **Rationale:** The embedding layer is frequently accessed and relatively small. Moving it back and forth to CPU creates a significant bottleneck and caused runtime device mismatch errors. It is now pinned to the GPU.
+
+2. **Flowing Weights (GDS/Kvikio Optimization):**
+   - Modified `oForGeneration.offload_layers_to_cpu`.
+   - **Old Behavior:** Loaded layers into CPU RAM (`offload_dict_to_gpu_cpu(gpu=False)`).
+   - **New Behavior:** Explicitly *skips* loading to CPU. Instead, it clears any existing CPU cache (`del loader.offloaded_map[base]`) and runs `torch.cuda.empty_cache()`.
+   - **Rationale:** This enforces a "Flowing" architecture where weights are streamed directly from NVMe to GPU (via `kvikio` in `gds_loader.py`) when needed by the layer, rather than staging them in CPU RAM. This reduces CPU memory pressure and leverages the high bandwidth of GDS.
+
+Fixes & Caveats:
+- Fix: Resolved contradictory logic where embeddings were moved to CPU while inputs were on GPU.
+- Feature: Aligns with "Blackwell-Optimized" workflow (Stationary Embeddings + Flowing Weights).
+- Caveat: Requires `kvikio` and compatible hardware/drivers for maximum performance. Without `kvikio`, it will fall back to standard disk reading but still skip the CPU RAM caching step.
+
+Usage Instructions:
+No changes to usage commands. The optimization is internal.
+```bash
+python3 scripts/example_deepseek_moe.py
+```
+
+Technical Metrics:
+- Verifies that `embed_tokens` remains on GPU.
+- Ensures `offload_layers_to_cpu` clears cache instead of filling RAM.

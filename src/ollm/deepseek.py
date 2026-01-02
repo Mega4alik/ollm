@@ -66,7 +66,6 @@ class MyDeepseekModel(DeepseekModel):
 			self.embed_tokens.to(args[0].device)
 
 		out = super().forward(*args, **kwargs)
-		self.embed_tokens.cpu()
 		return out
 
 # Monkey-patching module
@@ -85,7 +84,10 @@ class oForGeneration:
 		for layer_idx in range(min(layers_num, self.num_hidden_layers)):
 			base = f"model.layers.{layer_idx}."
 			loader.preload_layer_safetensors(base)
-			loader.offload_dict_to_gpu_cpu(base, gpu=False)
+			#loader.offload_dict_to_gpu_cpu(base, gpu=False)
+			if hasattr(loader, "offloaded_map") and base in loader.offloaded_map:
+				del loader.offloaded_map[base]
+		torch.cuda.empty_cache()
 		print(f"./finished offloading layers to CPU {layers_num}/{self.num_hidden_layers}")
 
 
