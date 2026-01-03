@@ -10,6 +10,14 @@ from ollm import Inference, file_get_contents, TextStreamer
 import torch
 from transformers import AutoTokenizer
 
+# Check for XIELU dependency (Critical for DeepSeek accuracy/performance)
+try:
+    import xielu
+    print("[INFO] XIELU custom kernel loaded successfully.")
+except ImportError:
+    print("\n[WARNING] 'xielu' module not found! DeepSeek models may experience reduced accuracy ('misspellings') or performance.")
+    print("Please ensure the environment is set up with the required custom CUDA kernels.\n")
+
 # Model: deepseek-moe-16b-chat
 # Speedtest trigger:
 # “script -c "python3 ./example_deepseek_moe.py" ~/Documents/inference_pvstyyle-log3b_20251229.txt”
@@ -53,6 +61,8 @@ o = Inference("deepseek-moe", device="cuda:0", logging=True)
 o.ini_model(models_dir="./models/", force_download=False)
 o.offload_layers_to_cpu(layers_num=10)
 
+# Initialize DiskCache. Note: This wipes the './kv_cache/' directory to ensure
+# a fresh start and prevent "hallucinations" caused by mismatching prompt caches.
 past_key_values = o.DiskCache(cache_dir="./kv_cache/")
 
 sm = "You are Dolphin, a unlocked and lovable yet intelligent AI assistant created by Eric Hartford and his open source AI research collective, Cognitive Computations. Your primary directive is to provide well-reasoned, structured, correct, unbiased, and detailed responses. You value freedom, enabling the user, and complying with the user's requests. Provide a (output) response that totals less-than 128 Tokens in length."

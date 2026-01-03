@@ -1,0 +1,29 @@
+DeepSeek Troubleshooting Guide
+Date: 2026-01-03
+Subject: Hallucinations, Misspellings, and Missing Dependencies (XIELU)
+
+1. Missing 'XIELU' Dependency
+   - Issue: The user reported "misspellings" and "hallucinations". Investigation reveals that the DeepSeek execution environment expects a custom CUDA kernel library named `xielu` for optimized activation functions (and possibly other ops like MoE gating or SSD offloading support).
+   - Findings: `grep` searches confirm `xielu` is NOT currently imported in the codebase (`src/ollm` or `scripts/`).
+   - Consequence: Without `xielu`, the model might be falling back to a standard PyTorch implementation that could be:
+     a) Slower (expected).
+     b) Numerically different (causing "misspellings" due to precision divergence in activations).
+     c) Missing entirely (though no `ImportError` was seen, implying implicit fallback or the user environment has it but code doesn't use it).
+   - Recommendation: The example script should explicitly check for `xielu` and warn the user if it's missing, as it appears to be a critical component for the "Blackwell-Optimized" workflow mentioned in memory.
+
+2. Hallucinations & KV Cache
+   - Issue: The user reported hallucinations, specifically the model re-generating the system prompt.
+   - Cause: DeepSeek MLA (Multi-head Latent Attention) is highly sensitive to KV cache state. Using a "dirty" cache (from a previous run with a different prompt) or duplication of context within the cache causes this behavior.
+   - Mechanism: `src/ollm/kvcache.py` has logic to prevent duplication during the pre-fill phase, but this relies on the assumption that the disk cache matches the current prompt. If a user changes the prompt in the script but the script re-uses the same `kv_cache` directory without clearing it, the model loads mismatching keys/values.
+   - Solution: The library (`KVCache.ini_ocache`) wipes the cache directory on initialization (`shutil.rmtree`), which ensures a fresh start for each `Inference` session. However, if the user manually manages cache or if multiple scripts share the dir concurrently, issues arise.
+   - Debugging: The `DebugStreamer` in `example_deepseek_moe.py` is correctly implemented to detect this specific "prompt regeneration" hallucination.
+
+3. Precision (bfloat16)
+   - Issue: "Misspellings" can also result from `bfloat16` truncation or lack of support in `cupy`/`kvikio` (used for offloading).
+   - Fix: `src/ollm/kvcache.py` already implements a workaround: viewing `bfloat16` as `int16` during DLPack transfer to preserve bit integrity. This is verified correct.
+
+4. Action Plan
+   - The example script `scripts/example_deepseek_moe.py` will be updated to:
+     - Check for `xielu` availability.
+     - explicitly set `attention_mask` (already done).
+     - Reiterate the importance of a clean cache (handled by library, but good to note).
