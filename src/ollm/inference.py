@@ -1,4 +1,4 @@
-import os, requests, zipfile
+import os, requests, zipfile, warnings
 import torch
 from transformers import AutoTokenizer, AutoProcessor, AutoConfig
 from .utils import Stats, file_get_contents
@@ -13,6 +13,7 @@ def get_attn_implementation():
 		print("Warning: flash_attention_2 is not imported. The context length will be limited")
 		return None
 
+warnings.filterwarnings("ignore", message=".*torch_dtype is deprecated.*")
 
 class Inference:
 	def __init__(self, model_id, device="cuda:0", logging=True, multimodality=False):

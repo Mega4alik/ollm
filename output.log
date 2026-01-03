@@ -1,0 +1,14 @@
+Warning: kvikio is not imported
+loading model from ./models/qwen3-next-80B
+Traceback (most recent call last):
+  File "/app/scripts/example_largetest2-pv_.py", line 11, in <module>
+    o.ini_model(models_dir="./models/", force_download=False)
+  File "/app/src/ollm/inference.py", line 89, in ini_model
+    self.load_model(model_dir)
+  File "/app/src/ollm/inference.py", line 96, in load_model
+    qwen3_next.loader = MoEWeightsLoader(model_dir, device=self.device)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/src/ollm/gds_loader.py", line 341, in __init__
+    with open(index_path) as f: indexes = json.load(f)
+         ^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: './models/qwen3-next-80B/model.safetensors.index.json'
