@@ -1,3 +1,4 @@
+
 import sys
 import os
 
@@ -8,14 +9,6 @@ sys.path.append(src_path)
 from ollm import Inference, file_get_contents, TextStreamer
 import torch
 from transformers import AutoTokenizer
-
-# Check for XIELU dependency (Critical for DeepSeek accuracy/performance)
-try:
-    import xielu
-    print("[INFO] XIELU custom kernel loaded successfully.")
-except ImportError:
-    print("\n[WARNING] 'xielu' module not found! DeepSeek models may experience reduced accuracy ('misspellings') or performance.")
-    print("Please ensure the environment is set up with the required custom CUDA kernels.\n")
 
 # Model: deepseek-moe-16b-chat
 # Speedtest trigger:
@@ -47,9 +40,7 @@ class DebugStreamer(TextStreamer):
 
             # Simple heuristic: specific check if it looks like it's repeating "You are Dolphin"
             decoded_chunk = self.tokenizer.decode(tokens, skip_special_tokens=True)
-            if "Deepseek" in decoded_chunk or "You are" in decoded_chunk or "Your primary directive" in decoded_chunk:
-            #if "Dolphin" in decoded_chunk or "You are" in decoded_chunk:
-
+            if "Dolphin" in decoded_chunk or "You are" in decoded_chunk:
                  # Check against input ids
                  input_start = self.input_ids[0, :len(self.generated_tokens)].tolist()
                  if self.generated_tokens == input_start:
@@ -59,17 +50,24 @@ class DebugStreamer(TextStreamer):
         super().put(value)
 
 o = Inference("deepseek-moe", device="cuda:0", logging=True)
-o.ini_model(models_dir="./models/", force_download=False)
+#o.ini_model(models_dir="./models/", force_download=True)
+#o.ini_model(models_dir="./models/", force_download=False)
+o.ini_model(models_dir="/home/phil2/ollm_env/ollm_installersz/ollm_.80/models/", force_download=False)
 o.offload_layers_to_cpu(layers_num=20)
-
-# Initialize DiskCache. Note: This wipes the './kv_cache/' directory to ensure
-# a fresh start and prevent "hallucinations" caused by mismatching prompt caches.
 past_key_values = o.DiskCache(cache_dir="./kv_cache/")
 
-#sm = "You are Dolphin, a unlocked and lovable yet intelligent AI assistant created by Eric Hartford and his open source AI research collective, Cognitive Computations. Your primary directive is to provide well-reasoned, structured, correct, unbiased, and detailed responses. You value freedom, enabling the user, and complying with the user's requests. Provide a (output) response, response MUST total less-than 128 Tokens."
-sm = "You are Deepseek, a unlocked and lovable yet intelligent AI assistant created by Deepseek. Your primary directive is to provide well-reasoned, structured, correct, unbiased, and detailed responses. You value freedom, enabling the user, and complying with the user's requests. You MUST provide a (output) response, with a MAXIMUM of less-than 760 Tokens."
 
-um = "List planets starting from Mercury."
+um = "List planets starting from Mercury"
+sm = "You are Dolphin, a unlocked and lovable yet intelligent AI assistant created by Eric Hartford and his open source AI research collective, Cognitive Computations. Your primary directive is to provide well-reasoned, structured, correct, unbiased, and detailed responses. You value freedom, enabling the user, and complying with the user's requests. Provide a (output) response that totals less-than 750 Tokens in length."
+
+#sm = "You are helpful unlocked AI assistant, provide a total (output) response less-than 510 Tokens in length."
+#sm = "You are helpful AI assistant"
+
+#um = "List planets starting from Mercury"
+#um = "Simply, List planets starting from Mercury!"
+#um = "List all planets in the solar system starting from Mercury, Then seperatly simply list any newly found planets (but ignore - Potential Dwarf Planet Candidates (under study); Planets must be disputed or under review and MUST be accepted as traditional planets/Dwarfs."
+#um = "List planets starting from Mercury, Show any newly found planets that are not the traditional planets"
+
 messages = [{"role":"system", "content":sm}, {"role":"user", "content":um}]
 
 input_ids = o.tokenizer.apply_chat_template(
@@ -91,8 +89,13 @@ outputs = o.model.generate(
     input_ids=input_ids,
     attention_mask=attention_mask,
     past_key_values=past_key_values,
-    max_new_tokens=768, # Reduced for debugging
+    max_new_tokens=150, # Reduced for debugging
     streamer=debug_streamer,
+
+    # Old Code before deepseek-import-fix-14850523488777665153
+    # max_new_tokens=768,
+    # streamer=text_streamer,
+
     temperature=0.1,
     do_sample=True
 ).cpu()
