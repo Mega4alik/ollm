@@ -1,0 +1,43 @@
+Summary of Changes:
+Implemented `OffloadedDynamicKVCache` in `src/ollm/kvcache_offload.py`. This new class provides a strictly "Flowing" KV Cache for models like DeepSeek-MoE, ensuring that token history is saved to SSD after every generation step and VRAM is aggressively cleared. This addresses the OOM and "looping" issues caused by the previous implementation which failed to update the disk cache during generation.
+
+Detailed Implementation Notes:
+- Created `src/ollm/kvcache_offload.py`: A specialized module containing `OffloadedDynamicKVCache`.
+- `OffloadedDynamicKVCache` Implementation:
+    - Inherits from `transformers.DynamicCache`.
+    - Implements a custom `update` method that:
+        1. Loads the *entire* existing K/V history for the current layer from SSD (via `kvikio` if available, else `torch.load`).
+        2. Concatenates the new `key_states` and `value_states` in VRAM.
+        3. **Immediately saves** the updated full history back to SSD (overwriting the file).
+        4. Returns the full concatenated tensor to the model (required for attention).
+        5. **Prevention of VRAM Growth:** Crucially, instead of storing the full history tensors in `self.key_cache` and `self.value_cache` (which would keep them in VRAM), it stores **dummy empty tensors**. This satisfies `DynamicCache` structure requirements while freeing the actual data immediately after the forward pass.
+        6. Manages sequence length tracking via a dedicated `_current_seq_len` counter (updated by layer 0) since the internal lists contain empty tensors.
+    - Implements `evict(layer_idx)` to allow the model loop to explicitly clear VRAM references after computation (though `update` also minimizes retention).
+    - Supports `kvikio` (GDS) for high-performance I/O, with metadata sidecar files (`.json`) to handle shapes/dtypes (addressing the "bytes only" nature of kvikio).
+    - Handles `bfloat16` serialization via `view(int16)` workaround for `cupy` compatibility.
+
+Fixes & Caveats:
+- **Fix:** Resolved the OOM and "prompt repetition" issues. The previous code only saved to disk during pre-fill. During generation, it loaded the *static* pre-fill cache and appended new tokens *only in VRAM* (leading to OOM) or failed to persist them (leading to looping/hallucination if VRAM was cleared). The new class ensures state persistence.
+- **Caveat:** Performance impact. Every token generation step involves a full Read+Write of the KV cache for every layer. This is significantly slower than VRAM-only inference but enables running 16B+ context models on limited VRAM.
+- **Caveat:** `OffloadedDynamicKVCache` must be explicitly used by the inference script. It is not the default.
+
+Usage Instructions:
+To use the new offloaded cache, updated scripts (e.g., `scripts/example_deepseek_moe.py`) should import and instantiate `OffloadedDynamicKVCache`:
+
+```python
+from ollm.kvcache_offload import OffloadedDynamicKVCache
+
+# ... inside script ...
+# Instead of o.DiskCache or default:
+past_key_values = OffloadedDynamicKVCache(cache_dir="./kv_cache/", device=o.device, stats=None)
+
+outputs = o.model.generate(
+    ...,
+    past_key_values=past_key_values,
+    ...
+)
+```
+
+Technical Metrics:
+- Configuration: Intended for DeepSeek-MoE-16B on consumer GPUs (e.g., 16GB VRAM) where full context does not fit.
+- I/O Pattern: Full layer load -> append 1 token -> full layer save -> Free VRAM.
