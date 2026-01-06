@@ -77,8 +77,7 @@ messages = [{"role":"system", "content":sm}, {"role":"user", "content":um}]
 input_ids = o.tokenizer.apply_chat_template(
     messages,
     tokenize=True,
-    #add_generation_prompt=True,
-    add_generation_prompt=False,
+    add_generation_prompt=True,
     return_tensors="pt"
 ).to(o.device)
 
@@ -89,6 +88,20 @@ attention_mask = torch.ones_like(input_ids)
 # Initialize DebugStreamer with input_ids to compare against
 debug_streamer = DebugStreamer(o.tokenizer, input_ids, skip_prompt=True, skip_special_tokens=False)
 
+# Explicitly handle stopping conditions to prevent runaway generation
+# This is critical for models that might not default to the correct EOS token when templates are manually manipulated
+eos_token_id = [o.tokenizer.eos_token_id]
+if hasattr(o.tokenizer, "convert_tokens_to_ids"):
+    # Common DeepSeek/OpenAI variants sometimes use <|EOT|> or similar
+    try:
+        eot_id = o.tokenizer.convert_tokens_to_ids("<|EOT|>")
+        if eot_id is not None and eot_id != o.tokenizer.unk_token_id:
+            eos_token_id.append(eot_id)
+    except:
+        pass
+
+print(f"Setting `pad_token_id` to `eos_token_id`:{o.tokenizer.eos_token_id} for open-end generation.")
+
 outputs = o.model.generate(
     input_ids=input_ids,
     attention_mask=attention_mask,
@@ -96,7 +109,9 @@ outputs = o.model.generate(
     max_new_tokens=768, # Reduced for debugging
     streamer=debug_streamer,
     temperature=0.1,
-    do_sample=True
+    do_sample=True,
+    pad_token_id=o.tokenizer.eos_token_id,
+    eos_token_id=eos_token_id
 ).cpu()
 
 answer = o.tokenizer.decode(outputs[0][input_ids.shape[-1]:], skip_special_tokens=False)

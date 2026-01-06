@@ -1,0 +1,42 @@
+DeepSeek OOM & SSD Offloading Crash Fix
+=========================================
+
+1. Summary of Changes
+---------------------
+This update addresses two critical issues encountered when running DeepSeek-MoE with the `ollm` library:
+1.  **VRAM Out-Of-Memory (OOM) / Runaway Generation:** The model previously failed to stop generating because the `add_generation_prompt=True` flag and explicit `eos_token_id` were missing. This caused infinite loops filling the KV cache until the GPU crashed.
+2.  **SSD Offloading Crash (`kvikio` assert):** When enabling SSD offloading (`OffloadedDynamicKVCache`) to mitigate VRAM usage, a race condition in `kvikio` read/write operations caused a device-side assertion (`CUDA_ERROR_ASSERT`).
+
+2. Detailed Implementation Notes
+--------------------------------
+-   **`src/ollm/kvcache_offload.py`**:
+    -   Added explicit `torch.cuda.synchronize()` calls before `kvikio.CuFile.write` and after `kvikio.CuFile.read`. This ensures that the CUDA stream computing the tensors has finished before the GPU Direct Storage (GDS) operation begins, and conversely, that the read is complete before PyTorch attempts to use the data.
+    -   Added a file size verification check in `_load_from_disk_kvikio`. It now calculates the expected byte size (`elements * itemsize`) and compares it against `os.path.getsize()`. If they mismatch (indicating a corrupted or incomplete save), it raises a descriptive `RuntimeError` instead of crashing the GPU driver.
+    -   Hardened `bfloat16` handling by creating a contiguous view (`.contiguous()`) before casting to `int16` for storage.
+
+-   **`scripts/example_deepseek_moe.py`**:
+    -   Enabled `add_generation_prompt=True` in `apply_chat_template`. This injects the necessary control tokens (e.g., `<|im_start|>assistant`) to signal the model to begin its response.
+    -   Updated the `generate()` call to explicitly include `pad_token_id` and a list of `eos_token_id`s (including potential special tokens like `<|EOT|>`) to strictly enforce stopping conditions.
+
+3. Fixes & Caveats
+------------------
+-   **Synchronization Overhead:** Adding `synchronize()` adds a small latency penalty to every decoding step but is strictly necessary for stability when mixing PyTorch streams with external libraries like `kvikio`.
+-   **Hardware Requirement:** This fix assumes the presence of a GDS-compatible environment (NVIDIA GPU + proper drivers + `kvikio`). The code falls back to standard PyTorch CPU offloading if `kvikio` is missing, but "Mandatory SSD Offloading" requires the `kvikio` path.
+-   **Stopping Condition:** The fix for runaway generation relies on the tokenizer correctly mapping the EOS token.
+
+4. Usage Instructions
+---------------------
+Run the example script as follows:
+
+```bash
+export PYTHONPATH=src
+python3 scripts/example_deepseek_moe.py
+```
+
+Environment variables or `sys.path` modification (already present in the script) are required to locate the `ollm` package.
+
+5. Technical Metrics
+--------------------
+-   **Configuration:** DeepSeek-MoE-16b-chat
+-   **Generation Params:** `max_new_tokens=768`, `temperature=0.1`, `top_k=50`, `do_sample=True`.
+-   **Offloading:** 20 layers statically offloaded to CPU (weights), dynamic KV cache offloaded to NVMe SSD via `kvikio`.

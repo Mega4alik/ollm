@@ -95,14 +95,20 @@ class OffloadedDynamicKVCache(DynamicCache):
 		}
 		with open(meta_path, "w") as f: json.dump(meta, f)
 
+		# Ensure synchronization before GDS write
+		torch.cuda.synchronize()
+
 		# Helper to write
 		def write_tensor(tensor, path):
-			if not tensor.is_contiguous(): tensor = tensor.contiguous()
+			# Ensure tensor is contiguous in memory
+			tensor = tensor.contiguous()
 
 			# Handle bfloat16
 			if tensor.dtype == torch.bfloat16:
 				# View as int16 to preserve bits when converting to DLPack
-				cupy_t = cp.from_dlpack(to_dlpack(tensor.view(torch.int16)))
+				# We clone() to ensure we own the memory and it's not a strided view
+				tensor_view = tensor.view(torch.int16)
+				cupy_t = cp.from_dlpack(to_dlpack(tensor_view))
 			else:
 				cupy_t = cp.from_dlpack(to_dlpack(tensor))
 
@@ -111,6 +117,9 @@ class OffloadedDynamicKVCache(DynamicCache):
 
 		write_tensor(k, k_path)
 		write_tensor(v, v_path)
+
+		# Ensure write completion before proceeding
+		torch.cuda.synchronize()
 
 		if self.stats: self.stats.set("kvsave_gds", t1)
 
@@ -130,6 +139,14 @@ class OffloadedDynamicKVCache(DynamicCache):
 			n_elems = 1
 			for s in shape: n_elems *= s
 
+			# Verify file size matches expected elements * itemsize
+			if os.path.exists(path):
+				file_size = os.path.getsize(path)
+				itemsize = 2 if (is_bf16 or "float16" in dtype_str) else 4
+				if file_size != n_elems * itemsize:
+					# Corrupted or incomplete file - fatal for mandatory SSD offload
+					raise RuntimeError(f"KV Cache file corruption: {path} (Expected {n_elems * itemsize} bytes, found {file_size})")
+
 			# Determine device index from string "cuda:0" or torch.device
 			dev_idx = 0
 			if isinstance(device, str) and "cuda" in device:
@@ -140,11 +157,17 @@ class OffloadedDynamicKVCache(DynamicCache):
 				if device.index is not None:
 					dev_idx = device.index
 
+			# Synchronize before allocating/reading
+			torch.cuda.synchronize()
+
 			with cp.cuda.Device(dev_idx):
 				buf = cp.empty(n_elems, dtype=cp_dtype)
 
 			with kvikio.CuFile(path, "r") as f:
 				f.read(buf)
+
+			# Synchronize after read
+			torch.cuda.synchronize()
 
 			t = from_dlpack(buf.toDlpack())
 			if is_bf16: t = t.view(torch.bfloat16)
