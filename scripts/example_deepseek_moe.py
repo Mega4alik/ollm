@@ -6,6 +6,7 @@ src_path = os.path.join(current_dir, '..', 'src')
 sys.path.append(src_path)
 
 from ollm import Inference, file_get_contents, TextStreamer
+from ollm.kvcache_offload import OffloadedDynamicKVCache
 import torch
 from transformers import AutoTokenizer
 
@@ -64,7 +65,8 @@ o.offload_layers_to_cpu(layers_num=20)
 
 # Initialize DiskCache. Note: This wipes the './kv_cache/' directory to ensure
 # a fresh start and prevent "hallucinations" caused by mismatching prompt caches.
-past_key_values = o.DiskCache(cache_dir="./kv_cache/")
+# past_key_values = o.DiskCache(cache_dir="./kv_cache/")
+past_key_values = OffloadedDynamicKVCache(cache_dir="./kv_cache/", device=o.device, stats=o.stats)
 
 #sm = "You are Dolphin, a unlocked and lovable yet intelligent AI assistant created by Eric Hartford and his open source AI research collective, Cognitive Computations. Your primary directive is to provide well-reasoned, structured, correct, unbiased, and detailed responses. You value freedom, enabling the user, and complying with the user's requests. Provide a (output) response, response MUST total less-than 128 Tokens."
 sm = "You are Deepseek, a unlocked and lovable yet intelligent AI assistant created by Deepseek. Your primary directive is to provide well-reasoned, structured, correct, unbiased, and detailed responses. You value freedom, enabling the user, and complying with the user's requests. You MUST provide a (output) response, with a MAXIMUM of less-than 760 Tokens."

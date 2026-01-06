@@ -130,12 +130,15 @@ class OffloadedDynamicKVCache(DynamicCache):
 			n_elems = 1
 			for s in shape: n_elems *= s
 
-			# Determine device index from string "cuda:0"
+			# Determine device index from string "cuda:0" or torch.device
 			dev_idx = 0
 			if isinstance(device, str) and "cuda" in device:
 				try:
 					dev_idx = int(device.split(":")[-1])
 				except: pass
+			elif isinstance(device, torch.device) and device.type == "cuda":
+				if device.index is not None:
+					dev_idx = device.index
 
 			with cp.cuda.Device(dev_idx):
 				buf = cp.empty(n_elems, dtype=cp_dtype)

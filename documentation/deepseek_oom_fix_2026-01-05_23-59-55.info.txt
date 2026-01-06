@@ -1,0 +1,29 @@
+1. Summary of Changes:
+   Integrated a specialized Key-Value cache offloading mechanism (`OffloadedDynamicKVCache`) for the DeepSeek-MoE-16b model to resolve Out-Of-Memory (OOM) errors during long-context generation. This new cache implementation strictly enforces a "Load-Update-Save-Offload" cycle, ensuring that KV states are only resident in VRAM during the specific layer's computation and are immediately streamed to/from disk (using `kvikio` if available, or standard torch I/O) otherwise.
+
+2. Detailed Implementation Notes:
+   - **`src/ollm/kvcache_offload.py` (Updated):**
+     - Modified `_load_from_disk_kvikio` to correctly handle `torch.device` objects (resolving type errors where `device` was expected to be a string).
+     - Confirmed logic to view `bfloat16` tensors as `int16` for correct DLPack transfer via CuPy/Kvikio.
+   - **`scripts/example_deepseek_moe.py` (Updated):**
+     - Explicitly imported `OffloadedDynamicKVCache` from `ollm.kvcache_offload`.
+     - Replaced the standard `o.DiskCache()` call with `OffloadedDynamicKVCache(..., device=o.device, stats=o.stats)` to instantiate the optimized cache.
+     - This change bypasses the default `KVCache` (which keeps recent tokens in memory) in favor of the strict offloading implementation required for this hardware constraint.
+
+3. Fixes & Caveats:
+   - **Fix:** Resolved `AttributeError` and logic errors in `kvcache_offload.py` related to device index extraction. The code now supports both "cuda:0" strings and `torch.device('cuda', 0)` objects.
+   - **Fix:** Fixed OOM crashes by ensuring the `example_deepseek_moe.py` script actually uses the offloading class; previously it defaulted to the standard `DiskCache`.
+   - **Caveat:** The `OffloadedDynamicKVCache` is aggressive and significantly slower than standard inference due to layer-wise I/O latency. It is intended strictly for memory-constrained scenarios.
+   - **Caveat:** `kvikio` support is detected automatically. If missing, it falls back to standard `torch.load/save`, which is slower but functional.
+
+4. Usage Instructions:
+   - **Command:**
+     ```bash
+     export PYTHONPATH=src
+     python3 scripts/example_deepseek_moe.py
+     ```
+   - **Environment:** Ensure `xielu` (custom kernels) and `accelerate` are installed for optimal performance, though the script handles their absence with warnings.
+
+5. Technical Metrics:
+   - **Configuration:** `temperature=0.1`, `do_sample=True`, `max_new_tokens=768` (in example script).
+   - **Hardware:** Verified logic for Single-GPU environment (handling `device.index` correctly).
